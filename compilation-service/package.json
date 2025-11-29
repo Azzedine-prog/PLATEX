@@ -5,7 +5,9 @@
   "main": "compile.js",
   "type": "module",
   "scripts": {
-    "start": "node compile.js"
+    "start": "node compile.js",
+    "lint": "node --check compile.js",
+    "test": "npm run lint"
   },
   "dependencies": {
     "express": "^4.19.2",

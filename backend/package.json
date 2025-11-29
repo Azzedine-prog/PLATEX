@@ -5,7 +5,9 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "lint": "node --check server.js",
+    "test": "npm run lint"
   },
   "dependencies": {
     "axios": "^1.7.2",

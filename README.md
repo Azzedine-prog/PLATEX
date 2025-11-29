@@ -9,6 +9,26 @@ PLATEX is a cross-platform, real-time collaborative LaTeX editing suite composed
 
 All components prioritize low latency, horizontal scalability, and secure isolation for arbitrary LaTeX compilation workloads.
 
+## Quick Installation (Zero-Config)
+
+> **Prerequisites:** Docker (or Docker Desktop on Windows) and Node.js. The scripts below will verify and guide installation automatically.
+
+- **Linux/macOS:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/example/PLATEX/main/setup_platform.sh | bash
+  ```
+  This script checks Docker/Node.js, clones the repo, and runs `docker compose up -d`.
+
+- **Windows (PowerShell):**
+  1. Install **Docker Desktop** and ensure it is running (WSL2 backend recommended).
+  2. Run PowerShell as Administrator and execute:
+     ```powershell
+     irm https://raw.githubusercontent.com/example/PLATEX/main/setup_platform.ps1 | iex
+     ```
+  The PowerShell installer validates Docker Desktop/Node.js, clones the repo, and starts the stack with `docker compose up -d`.
+
+After installation, open **http://localhost:3000** for the backend API health check and target the compilation service at **http://localhost:7000**.
+
 ## High-Level Architecture
 ```
 [ Web App (React + State Mgmt) ] <---> [ Core Service (REST + WebSockets) ]
@@ -19,6 +39,17 @@ All components prioritize low latency, horizontal scalability, and secure isolat
                                                         |
                                                         +--> [ Isolated container running pdflatex/xelatex ]
 ```
+
+## How to Use (Local)
+1. Ensure the stack is running (`docker compose ps` should show the services).
+2. POST a compile request to the backend:
+   ```bash
+   curl -X POST http://localhost:3000/compile \
+     -H 'Content-Type: application/json' \
+     -d '{"main":"main.tex","files":{"main.tex":"\\documentclass{article}\\begin{document}Hi PLATEX!\\end{document}"}}'
+   ```
+   The backend forwards to the compilation microservice and returns base64-encoded PDF plus parsed log snippets.
+3. Integrate the web client or desktop wrapper to stream WebSocket events for collaborative editing and live compilation updates.
 
 ### Core Domain Models
 The following language-agnostic class/data model sketches outline the MVP entities and relationships. They are intended for the backend implementation (Node.js or Go) and align with a relational schema (PostgreSQL) but can map to document stores if needed.
@@ -89,6 +120,13 @@ The following language-agnostic class/data model sketches outline the MVP entiti
 - **Real-Time Engine:** Centralized OT processor maintaining document versions, cursor presence, and conflict resolution with idempotent sequencing.
 - **Compilation Orchestrator:** Accepts compilation requests, provisions containerized workers, streams logs, and publishes completion events to clients.
 - **Storage Layer:** PostgreSQL for metadata; object storage (e.g., S3-compatible) for blobs (PDFs, assets, snapshots, logs).
+
+## CI/CD
+- **GitHub Actions:** `.github/workflows/ci.yml` runs syntax checks for backend and compilation service on Linux and Windows, and builds Docker images on Linux to ensure the compose stack remains deployable.
+- **Artifacts:** Docker images can be published from the workflow (extend `docker-build` job with registry login/push steps as needed).
+
+## Desktop Packaging (Overview)
+Use Tauri/Electron with `npm run build:desktop` to emit a single-file executable (e.g., `PLATEX.exe`). The bundler should package the React frontend with the backend API endpoint configured for local/remote targets. This repository currently focuses on backend + compilation services; integrate the desktop wrapper in the `desktop/` directory following this convention.
 
 ## Dockerized Compilation Service Plan (Phase 1, Step 3)
 Objective: Execute arbitrary LaTeX code securely and predictably by isolating each build in a short-lived Docker container.
