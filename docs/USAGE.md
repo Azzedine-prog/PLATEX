@@ -1,26 +1,25 @@
-# PLATEX Usage & Installation Guide
+# PLATEX Usage Guide
 
-## Quickstart
-- **Linux/macOS:** `./setup_platform.sh`
-- **Windows (double-click):** run `setup_platform.bat` (auto-launches PowerShell with the right flags).
-- **Windows (PowerShell, Admin):** `./setup_platform.ps1`
-- Open http://localhost:3000 for backend health; compilation service at http://localhost:7000. If Docker Desktop just installed, launch it once so containers can start.
+1. **Start the app**
+   - Windows: double-click `setup_platform.bat` (first run installs prerequisites and launches the app).
+   - macOS/Linux: run `./setup_platform.sh`.
 
-## Workflow
-1. Start stack: `docker compose up -d`.
-2. Submit compilation via backend `/compile` endpoint with `main` and `files` map.
-3. Read response for `pdf` (base64) and parsed `log` entries.
-4. Use WebSockets (`/socket.io`) for collaborative edits and event streaming.
+2. **Create or open a `.tex` file**
+   - Use the toolbar buttons for New/Open/Save.
 
-## Troubleshooting
-- **Docker not running:** Start Docker Desktop (Windows) or daemon (Linux/macOS).
-- **Port conflicts:** Adjust `docker-compose.yml` port mappings (3000/7000) and re-run `docker compose up -d`.
-- **Missing dependencies:** Run the platform setup script again; it validates Docker and Node.js.
+3. **Compile to PDF**
+   - Click **Compile PDF**.
+   - The app searches for `pdflatex` or `xelatex` in your PATH.
+   - Output PDF is placed next to your `.tex` file and opened automatically when compilation succeeds.
 
-## Windows Notes
-- Requires Docker Desktop with WSL2 backend enabled.
-- Ensure PowerShell execution policy allows running the installer: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`.
+4. **Need a single executable?**
+   - Run `python build.py` after installing dependencies to create `dist/platex` (or `dist/platex.exe` on Windows).
 
-## Next Steps
-- Add frontend and desktop wrappers pointing to the backend URL.
-- Extend CI workflow to publish Docker images to your registry.
+## Requirements
+- Python 3.10+
+- LaTeX distribution with `pdflatex` or `xelatex` (TeX Live or MiKTeX)
+- GUI environment (Qt requires a desktop session)
+
+## Tips
+- Keep your `.tex` files in a simple folder without spaces to avoid path issues on some TeX engines.
+- If compilation hangs, check for missing packages in your LaTeX distribution.

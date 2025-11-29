@@ -1,73 +1,79 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL=${REPO_URL:-"https://github.com/example/PLATEX.git"}
-PROJECT_DIR=${PROJECT_DIR:-"PLATEX"}
+REPO_URL="https://github.com/example/PLATEX.git"
+PROJECT_DIR="PLATEX"
 
-command_exists() {
+need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
-install_docker() {
-  echo "Docker not found. Attempting installation..."
-  if command_exists apt-get; then
-    sudo apt-get update && sudo apt-get install -y docker.io
-    sudo systemctl enable --now docker
-  elif command_exists brew; then
-    brew install --cask docker || brew install docker
-    echo "Please start the Docker app if it is not already running."
-  else
-    echo "Please install Docker manually from https://docs.docker.com/get-docker/" && exit 1
+ensure_python() {
+  if need_cmd python3; then
+    PYTHON=python3
+    return
   fi
+  echo "Python 3.10+ is required." >&2
+  if [[ "$(uname -s)" == "Darwin" ]] && need_cmd brew; then
+    echo "Installing Python via Homebrew..."
+    brew install python@3 || true
+  elif need_cmd apt-get; then
+    echo "Installing Python via apt..."
+    sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
+  else
+    echo "Please install Python manually from https://www.python.org/downloads/" >&2
+    exit 1
+  fi
+  PYTHON=python3
 }
 
-install_node() {
-  echo "Node.js not found. Attempting installation..."
-  if command_exists apt-get; then
-    sudo apt-get update && sudo apt-get install -y nodejs npm
-  elif command_exists brew; then
-    brew install node
+ensure_git() {
+  if need_cmd git; then return; fi
+  if need_cmd apt-get; then
+    sudo apt-get update && sudo apt-get install -y git
+  elif [[ "$(uname -s)" == "Darwin" ]] && need_cmd brew; then
+    brew install git
   else
-    echo "Please install Node.js manually from https://nodejs.org/en/download/" && exit 1
+    echo "Git is required. Install from https://git-scm.com/downloads" >&2
+    exit 1
   fi
-}
-
-ensure_prerequisites() {
-  command_exists docker || install_docker
-  command_exists node || install_node
 }
 
 clone_repo() {
   if [ ! -d "$PROJECT_DIR/.git" ]; then
-    echo "Cloning PLATEX repository from $REPO_URL ..."
     git clone "$REPO_URL" "$PROJECT_DIR"
   else
-    echo "Repository already present at $PROJECT_DIR. Skipping clone."
+    echo "Repository already present at $PROJECT_DIR"
   fi
 }
 
-start_stack() {
-  pushd "$PROJECT_DIR" >/dev/null
-  echo "Starting PLATEX stack via docker-compose..."
-  docker compose up -d --build
-  popd >/dev/null
+install_deps() {
+  cd "$PROJECT_DIR"
+  $PYTHON -m pip install --upgrade pip
+  $PYTHON -m pip install -r requirements.txt
+  cd - >/dev/null
 }
 
-print_banner() {
-  cat <<'MSG'
-========================================
-PLATEX installation complete.
-Backend: http://localhost:3000
-Compilation service: http://localhost:7000
-========================================
-MSG
+build_if_possible() {
+  cd "$PROJECT_DIR"
+  echo "Building one-file executable with PyInstaller (optional)..."
+  if ! $PYTHON build.py; then
+    echo "Build failed; will run from source." >&2
+  fi
+  cd - >/dev/null
 }
 
-main() {
-  ensure_prerequisites
-  clone_repo
-  start_stack
-  print_banner
+launch_app() {
+  cd "$PROJECT_DIR"
+  if [ -f dist/platex ]; then
+    echo "Launching packaged app..."
+    ./dist/platex &
+  else
+    echo "Launching from source..."
+    $PYTHON app/main.py &
+  fi
+  cd - >/dev/null
 }
 
-main "$@"
+banner() {
+  cat <<'EOF'

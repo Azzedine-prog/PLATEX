@@ -5,38 +5,22 @@ on:
   pull_request:
 
 jobs:
-  lint:
-    name: Syntax check (Node)
+  python-build:
+    name: Python checks
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: 18
-      - name: Install backend deps
-        working-directory: backend
-        run: npm install
-      - name: Lint backend
-        working-directory: backend
-        run: npm run lint
-      - name: Install compilation service deps
-        working-directory: compilation-service
-        run: npm install
-      - name: Lint compilation service
-        working-directory: compilation-service
-        run: npm run lint
-
-  docker-build:
-    name: Compose build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Docker info
-        run: docker info
-      - name: Compose config
-        run: docker compose config
-      - name: Build images
-        run: docker compose build
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Syntax check
+        run: python -m compileall app
+      - name: PyInstaller build
+        run: python build.py
