@@ -10,7 +10,7 @@
 3. **Compile to PDF**
    - Click **Compile PDF**.
    - The app searches for `pdflatex` or `xelatex` in your PATH.
-   - Output PDF is placed next to your `.tex` file and opened automatically when compilation succeeds.
+   - Output PDF is placed next to your `.tex` file and displayed in the live preview pane; it also opens with your system viewer if the preview cannot load.
 
 4. **Need a single executable?**
    - Run `python build.py` after installing dependencies to create `dist/platex` (or `dist/platex.exe` on Windows).

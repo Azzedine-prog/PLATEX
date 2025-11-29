@@ -3,7 +3,7 @@
 PLATEX is now a simple, cross-platform desktop LaTeX editor built with Python and Qt. It saves `.tex` files locally and can call your installed LaTeX distribution (TeX Live or MiKTeX) to produce PDFs. Everything ships as a single runnable application that you can launch directly or package via PyInstaller.
 
 ## What you get
-- A friendly Qt editor with open/save, toolbar shortcuts, and a one-click **Compile PDF** button.
+- A friendly Qt editor with open/save, toolbar shortcuts, a one-click **Compile PDF** button, and a built-in split-view PDF preview.
 - Automatic detection of `pdflatex` or `xelatex` (whichever is available in your PATH).
 - Double-click installers for Windows plus single-command setup for macOS/Linux.
 - One-file binary builds via PyInstaller (`platex.exe` on Windows, `platex` on macOS/Linux).
@@ -37,6 +37,7 @@ python build.py
 pip install -r requirements.txt
 python app/main.py
 ```
+- Hit **Compile PDF** to refresh the live preview alongside the editor pane.
 
 ## Troubleshooting
 - **"No LaTeX compiler found"**: Install TeX Live (macOS/Linux) or MiKTeX (Windows) so `pdflatex` or `xelatex` is available in PATH.

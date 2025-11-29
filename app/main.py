@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QFile, QTextStream
 from PySide6.QtGui import QAction
+from PySide6.QtPdf import QPdfDocument
+from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -14,6 +16,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QToolBar,
     QStatusBar,
+    QSplitter,
 )
 
 
@@ -25,7 +28,17 @@ class EditorWindow(QMainWindow):
 
         self.editor = QTextEdit()
         self.editor.setTabStopDistance(32)
-        self.setCentralWidget(self.editor)
+
+        self.preview_document = QPdfDocument(self)
+        self.preview = QPdfView()
+        self.preview.setDocument(self.preview_document)
+        self.preview.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+
+        splitter = QSplitter()
+        splitter.addWidget(self.editor)
+        splitter.addWidget(self.preview)
+        splitter.setSizes([650, 350])
+        self.setCentralWidget(splitter)
 
         self.current_file: Path | None = None
         self.status = QStatusBar()
@@ -161,10 +174,22 @@ class EditorWindow(QMainWindow):
 
         if result.returncode == 0 and pdf_output.exists():
             self.status.showMessage(f"Compilation successful → {pdf_output}", 4000)
-            QMessageBox.information(self, "Success", f"PDF created: {pdf_output}")
-            self._open_file(pdf_output)
+            self._load_preview(pdf_output)
         else:
             QMessageBox.critical(self, "Compilation failed", result.stdout or "No output")
+
+    def _load_preview(self, pdf_output: Path) -> None:
+        load_status = self.preview_document.load(str(pdf_output))
+        if load_status == QPdfDocument.Status.Ready:
+            self.preview.setPageMode(QPdfView.PageMode.MultiPage)
+            QMessageBox.information(self, "Success", f"PDF created: {pdf_output}")
+        else:
+            QMessageBox.warning(
+                self,
+                "Preview unavailable",
+                f"Compiled PDF saved to {pdf_output}, but the in-app preview could not be loaded.",
+            )
+            self._open_file(pdf_output)
 
     def _open_file(self, path: Path) -> None:
         try:
