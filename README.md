@@ -11,23 +11,25 @@ All components prioritize low latency, horizontal scalability, and secure isolat
 
 ## Quick Installation (Zero-Config)
 
-> **Prerequisites:** Docker (or Docker Desktop on Windows) and Node.js. The scripts below will verify and guide installation automatically.
+> **Prerequisites:** Docker (or Docker Desktop on Windows) and Node.js. The scripts below verify, attempt installation (via `apt`, Homebrew, or `winget`), and guide you if manual steps remain.
+
+- **Windows (one-click for non-technical users):**
+  1. Download the latest **`setup_platform.bat`** and **`setup_platform.ps1`** from the repository root and keep them in the same folder.
+  2. Double-click `setup_platform.bat`. It launches PowerShell with the right permissions, installs Git/Docker Desktop/Node.js via `winget` when available, clones the repo, and starts Docker Compose.
+  3. If Docker Desktop is installed during the run, open it once so the services can start.
+
+- **Windows (PowerShell command):**
+  ```powershell
+  irm https://raw.githubusercontent.com/example/PLATEX/main/setup_platform.ps1 | iex
+  ```
 
 - **Linux/macOS:**
   ```bash
   curl -fsSL https://raw.githubusercontent.com/example/PLATEX/main/setup_platform.sh | bash
   ```
-  This script checks Docker/Node.js, clones the repo, and runs `docker compose up -d`.
+  The script checks Docker/Node.js, installs them when possible, clones the repo, and runs `docker compose up -d`.
 
-- **Windows (PowerShell):**
-  1. Install **Docker Desktop** and ensure it is running (WSL2 backend recommended).
-  2. Run PowerShell as Administrator and execute:
-     ```powershell
-     irm https://raw.githubusercontent.com/example/PLATEX/main/setup_platform.ps1 | iex
-     ```
-  The PowerShell installer validates Docker Desktop/Node.js, clones the repo, and starts the stack with `docker compose up -d`.
-
-After installation, open **http://localhost:3000** for the backend API health check and target the compilation service at **http://localhost:7000**.
+After installation, open **http://localhost:3000** for the backend API health check and target the compilation service at **http://localhost:7000**. Docker will take a minute to build and warm up the first time.
 
 ## High-Level Architecture
 ```

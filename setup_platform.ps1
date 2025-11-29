@@ -9,16 +9,39 @@ function CommandExists($cmd) {
     $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue)
 }
 
+function InstallWithWinget($id, $friendly) {
+    if (-not (CommandExists "winget")) {
+        Write-Host "winget not found. Please install $friendly manually." -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "Installing $friendly via winget..." -ForegroundColor Cyan
+    winget install --id $id -e --silent -h
+    return $true
+}
+
 function EnsureDocker {
     if (CommandExists "docker") { return }
-    Write-Host "Docker not found. Install Docker Desktop from https://www.docker.com/products/docker-desktop and restart PowerShell." -ForegroundColor Yellow
-    exit 1
+    if (-not (InstallWithWinget "Docker.DockerDesktop" "Docker Desktop")) {
+        Write-Host "Docker not found. Install Docker Desktop from https://www.docker.com/products/docker-desktop and restart PowerShell." -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "Docker Desktop installed. Please ensure it is running before continuing." -ForegroundColor Yellow
 }
 
 function EnsureNode {
     if (CommandExists "node") { return }
-    Write-Host "Node.js not found. Install from https://nodejs.org/en/download and restart PowerShell." -ForegroundColor Yellow
-    exit 1
+    if (-not (InstallWithWinget "OpenJS.NodeJS.LTS" "Node.js LTS")) {
+        Write-Host "Node.js not found. Install from https://nodejs.org/en/download and restart PowerShell." -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+function EnsureGit {
+    if (CommandExists "git") { return }
+    if (-not (InstallWithWinget "Git.Git" "Git")) {
+        Write-Host "Git not found. Install from https://git-scm.com/downloads and restart PowerShell." -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 function CloneRepo {
@@ -43,9 +66,11 @@ function PrintBanner {
     Write-Host "PLATEX installation complete."
     Write-Host "Backend: http://localhost:3000"
     Write-Host "Compilation service: http://localhost:7000"
+    Write-Host "If Docker Desktop was installed just now, please ensure it is running."
     Write-Host "========================================"
 }
 
+EnsureGit
 EnsureDocker
 EnsureNode
 CloneRepo

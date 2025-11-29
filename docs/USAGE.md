@@ -2,8 +2,9 @@
 
 ## Quickstart
 - **Linux/macOS:** `./setup_platform.sh`
+- **Windows (double-click):** run `setup_platform.bat` (auto-launches PowerShell with the right flags).
 - **Windows (PowerShell, Admin):** `./setup_platform.ps1`
-- Open http://localhost:3000 for backend health; compilation service at http://localhost:7000.
+- Open http://localhost:3000 for backend health; compilation service at http://localhost:7000. If Docker Desktop just installed, launch it once so containers can start.
 
 ## Workflow
 1. Start stack: `docker compose up -d`.
