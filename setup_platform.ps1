@@ -47,6 +47,22 @@ function InstallDeps {
     Pop-Location
 }
 
+function EnsureLatex {
+    if (CommandExists "pdflatex" -or CommandExists "xelatex" -or CommandExists "latexmk") { return }
+    Write-Host "Installing MiKTeX silently (one-time setup)..." -ForegroundColor Cyan
+    if (CommandExists "winget") {
+        winget install --id MiKTeX.MiKTeX -e --silent --accept-package-agreements --accept-source-agreements
+        if (CommandExists "initexmf") { initexmf --mklinks --force }
+        if (CommandExists "mpm") {
+            mpm --admin --update-db
+            mpm --admin --install=collection-latexrecommended
+        }
+    }
+    else {
+        Write-Host "Please install MiKTeX from https://miktex.org/download then rerun this script." -ForegroundColor Yellow
+    }
+}
+
 function BuildIfPossible {
     Push-Location $ProjectDir
     try {
@@ -84,6 +100,7 @@ EnsureGit
 EnsurePython
 CloneRepo
 InstallDeps
+EnsureLatex
 BuildIfPossible
 PrintBanner
 LaunchApp

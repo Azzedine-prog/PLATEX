@@ -6,10 +6,11 @@
 
 2. **Create or open a `.tex` file**
    - Use the toolbar buttons for New/Open/Save.
+   - Use **New from Template** to start with article/report/beamer layouts.
 
 3. **Compile to PDF**
    - Click **Compile PDF**.
-   - The app searches for `pdflatex` or `xelatex` in your PATH.
+   - The app searches for `latexmk`, `pdflatex`, or `xelatex` in your PATH and installs a toolchain automatically if missing.
    - Output PDF is placed next to your `.tex` file and displayed in the live preview pane; it also opens with your system viewer if the preview cannot load.
 
 4. **Need a single executable?**
@@ -17,9 +18,9 @@
 
 ## Requirements
 - Python 3.10+
-- LaTeX distribution with `pdflatex` or `xelatex` (TeX Live or MiKTeX)
+- LaTeX distribution with `latexmk`, `pdflatex`, or `xelatex` (setup scripts install TeX Live/MiKTeX automatically when possible)
 - GUI environment (Qt requires a desktop session)
 
 ## Tips
 - Keep your `.tex` files in a simple folder without spaces to avoid path issues on some TeX engines.
-- If compilation hangs, check for missing packages in your LaTeX distribution.
+- If compilation hangs, rerun the setup script so it can refresh/update the LaTeX distribution automatically.

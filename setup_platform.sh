@@ -54,6 +54,23 @@ install_deps() {
   cd - >/dev/null
 }
 
+install_latex() {
+  if command -v pdflatex >/dev/null 2>&1 || command -v xelatex >/dev/null 2>&1 || command -v latexmk >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Installing LaTeX toolchain (one-time setup)…"
+  if [[ "$(uname -s)" == "Darwin" ]] && need_cmd brew; then
+    brew install --cask basictex || true
+    sudo /Library/TeX/texbin/tlmgr install latexmk || true
+  elif need_cmd apt-get; then
+    sudo apt-get update
+    sudo apt-get install -y texlive-full latexmk
+  else
+    echo "No supported package manager found. Please install TeX Live or MiKTeX manually." >&2
+  fi
+}
+
 build_if_possible() {
   cd "$PROJECT_DIR"
   echo "Building one-file executable with PyInstaller (optional)..."

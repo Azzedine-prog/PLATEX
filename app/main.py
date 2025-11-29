@@ -11,6 +11,7 @@ from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
     QTextEdit,
@@ -64,6 +65,18 @@ class EditorWindow(QMainWindow):
         self.compile_action = QAction("Compile PDF", self)
         self.compile_action.triggered.connect(self.compile_pdf)
 
+        self.template_action = QAction("New from Template", self)
+        self.template_action.triggered.connect(self.new_from_template)
+
+        self.figure_action = QAction("Insert Figure", self)
+        self.figure_action.triggered.connect(lambda: self.insert_snippet("figure"))
+
+        self.table_action = QAction("Insert Table", self)
+        self.table_action.triggered.connect(lambda: self.insert_snippet("table"))
+
+        self.bibliography_action = QAction("Insert Bibliography", self)
+        self.bibliography_action.triggered.connect(lambda: self.insert_snippet("bibliography"))
+
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about)
 
@@ -71,11 +84,16 @@ class EditorWindow(QMainWindow):
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
         toolbar.addAction(self.new_action)
+        toolbar.addAction(self.template_action)
         toolbar.addAction(self.open_action)
         toolbar.addAction(self.save_action)
         toolbar.addAction(self.save_as_action)
         toolbar.addSeparator()
         toolbar.addAction(self.compile_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.figure_action)
+        toolbar.addAction(self.table_action)
+        toolbar.addAction(self.bibliography_action)
         toolbar.addSeparator()
         toolbar.addAction(self.about_action)
         self.addToolBar(toolbar)
@@ -90,6 +108,61 @@ class EditorWindow(QMainWindow):
             self.current_file = None
             self._update_title()
             self.status.showMessage("New file created", 2000)
+
+    def new_from_template(self) -> None:
+        if not self._confirm_discard_changes():
+            return
+
+        templates = {
+            "Article": """\\documentclass{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{amsmath,amssymb}
+\\title{Your Title}
+\\author{Your Name}
+\\begin{document}
+\\maketitle
+
+\\section{Introduction}
+Start writing here.
+
+\\end{document}
+""",
+            "Report": """\\documentclass{report}
+\\usepackage[utf8]{inputenc}
+\\usepackage{graphicx}
+\\title{Project Report}
+\\author{Your Name}
+\\begin{document}
+\\maketitle
+
+\\chapter{Overview}
+Content goes here.
+
+\\end{document}
+""",
+            "Beamer": """\\documentclass{beamer}
+\\usetheme{Madrid}
+\\title{Your Talk}
+\\author{Your Name}
+\\begin{document}
+\\begin{frame}\titlepage\end{frame}
+\\begin{frame}{Agenda}
+  \begin{itemize}
+    \item Point 1
+    \item Point 2
+  \end{itemize}
+\\end{frame}
+\\end{document}
+""",
+        }
+
+        names = list(templates.keys())
+        name, ok = QInputDialog.getItem(self, "New from template", "Choose a starting point", names, 0, False)
+        if ok and name in templates:
+            self.editor.setPlainText(templates[name])
+            self.current_file = None
+            self._update_title()
+            self.status.showMessage(f"Loaded {name} template", 2000)
 
     def open_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open LaTeX File", "", "TeX Files (*.tex);;All Files (*)")
@@ -146,24 +219,37 @@ class EditorWindow(QMainWindow):
 
         command = self._detect_compiler()
         if not command:
+            self.status.showMessage("Preparing LaTeX toolchain…", 4000)
+            command = self._install_toolchain()
+        if not command:
             QMessageBox.warning(
                 self,
                 "Compiler missing",
-                "No LaTeX compiler (pdflatex or xelatex) was found in PATH.\n"
-                "Install TeX Live or MiKTeX and try again.",
+                "No LaTeX compiler was found or could be installed automatically.\n"
+                "Please install TeX Live (macOS/Linux) or MiKTeX (Windows) and try again.",
             )
             return
 
         self.status.showMessage("Compiling…", 2000)
+        env = os.environ.copy()
+        env.setdefault("MIKTEX_AUTOINSTALL", "1")
+        env.setdefault("MIKTEX_ON_THE_FLY", "1")
+
+        cmd_name = Path(command).name.lower()
+        compile_cmd = [command, "-interaction=nonstopmode", str(tex_file.name if tex_file.parent else tex_file)]
+        if "latexmk" in cmd_name:
+            compile_cmd = [command, "-pdf", "-interaction=nonstopmode", "-halt-on-error", tex_file.name]
+
         try:
             result = subprocess.run(
-                [command, "-interaction=nonstopmode", str(tex_file)],
+                compile_cmd,
                 cwd=tex_file.parent,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=60,
                 check=False,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             QMessageBox.critical(self, "Timeout", "Compilation took too long and was stopped.")
@@ -203,10 +289,98 @@ class EditorWindow(QMainWindow):
             QMessageBox.warning(self, "Open file", f"Could not open file: {exc}")
 
     def _detect_compiler(self) -> str | None:
-        for candidate in ("pdflatex", "xelatex"):
-            if shutil.which(candidate):
-                return candidate
+        for candidate in ("latexmk", "pdflatex", "xelatex"):
+            path = shutil.which(candidate)
+            if path:
+                return path
         return None
+
+    def _install_toolchain(self) -> str | None:
+        """Best-effort, unattended installation of a LaTeX toolchain."""
+        if sys.platform.startswith("win"):
+            if shutil.which("winget"):
+                self.status.showMessage("Installing MiKTeX via winget…", 4000)
+                subprocess.run(
+                    [
+                        "winget",
+                        "install",
+                        "--id",
+                        "MiKTeX.MiKTeX",
+                        "-e",
+                        "--silent",
+                        "--accept-package-agreements",
+                        "--accept-source-agreements",
+                    ],
+                    check=False,
+                )
+                subprocess.run(["initexmf", "--mklinks", "--force"], check=False)
+                subprocess.run(["mpm", "--admin", "--update-db"], check=False)
+                subprocess.run(["mpm", "--admin", "--install=collection-latexrecommended"], check=False)
+            else:
+                QMessageBox.information(
+                    self,
+                    "Install MiKTeX",
+                    "Please install MiKTeX from https://miktex.org/download to compile locally.",
+                )
+        elif sys.platform.startswith("darwin"):
+            if shutil.which("brew"):
+                self.status.showMessage("Installing BasicTeX via Homebrew…", 4000)
+                subprocess.run(["brew", "install", "--cask", "basictex"], check=False)
+                subprocess.run(["sudo", "/Library/TeX/texbin/tlmgr", "option", "repository", "https://mirror.ctan.org/systems/texlive/tlnet"], check=False)
+                subprocess.run(["sudo", "/Library/TeX/texbin/tlmgr", "update", "--self", "--all"], check=False)
+                subprocess.run(["sudo", "/Library/TeX/texbin/tlmgr", "install", "latexmk"], check=False)
+        else:
+            if shutil.which("apt-get"):
+                self.status.showMessage("Installing TeX Live (this may take a few minutes)…", 4000)
+                subprocess.run(["sudo", "apt-get", "update"], check=False)
+                subprocess.run(["sudo", "apt-get", "install", "-y", "texlive-full", "latexmk"], check=False)
+
+        return self._detect_compiler()
+
+    def insert_snippet(self, kind: str) -> None:
+        snippets = {
+            "figure": """\\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.8\\linewidth]{example-image}
+  \caption{Caption text}
+  \label{fig:label}
+\\end{figure}
+
+""",
+            "table": """\\begin{table}[h]
+  \centering
+  \begin{tabular}{lll}
+    \hline
+    A & B & C \\
+    \hline
+    1 & 2 & 3 \\
+    4 & 5 & 6 \\
+    \hline
+  \end{tabular}
+  \caption{Table caption}
+  \label{tab:label}
+\\end{table}
+
+""",
+            "bibliography": """% Add this near the end of your document
+\\bibliographystyle{plain}
+\\bibliography{references}
+
+% Example .bib entry
+% @article{key,
+%   title={Example},
+%   author={Author, A.},
+%   journal={Journal},
+%   year={2024}
+% }
+""",
+        }
+
+        text = snippets.get(kind)
+        if text:
+            cursor = self.editor.textCursor()
+            cursor.insertText(text)
+            self.status.showMessage(f"Inserted {kind} snippet", 2000)
 
     def show_about(self) -> None:
         QMessageBox.information(
