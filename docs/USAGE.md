@@ -24,5 +24,5 @@
 
 ## Tips
 - Keep your `.tex` files in a simple folder without spaces to avoid path issues on some TeX engines.
-- Use the snippet buttons (figure, table, bibliography, section, equation, list, TOC, theorem, code) for quick Overleaf-style inserts.
+- Use the snippet dropdown on the toolbar or the editor right-click menu (figure, table, bibliography, section, equation, list, TOC, theorem, code) for quick Overleaf-style inserts.
 - If compilation hangs, rerun the setup script so it can refresh/update the LaTeX distribution automatically.

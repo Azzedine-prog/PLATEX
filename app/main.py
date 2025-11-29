@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFile, QTimer, QTextStream
+from PySide6.QtCore import QFile, QPoint, Qt, QTimer, QTextStream
 from PySide6.QtGui import QAction, QColor, QFont, QPalette
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
@@ -13,8 +13,11 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QMessageBox,
     QTextEdit,
+    QToolButton,
     QToolBar,
     QStatusBar,
     QSplitter,
@@ -27,6 +30,8 @@ class EditorWindow(QMainWindow):
         self.setWindowTitle("PLATEX – Lightweight LaTeX Editor")
         self.resize(1000, 700)
 
+        self._apply_theme()
+
         self.editor = QTextEdit()
         self.editor.setTabStopDistance(32)
         self._style_editor()
@@ -35,6 +40,9 @@ class EditorWindow(QMainWindow):
         self.preview = QPdfView()
         self.preview.setDocument(self.preview_document)
         self.preview.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        self.preview.setStyleSheet(
+            "QPdfView { background: #eef2f7; border-left: 1px solid #dbe2ec; }"
+        )
 
         splitter = QSplitter()
         splitter.addWidget(self.editor)
@@ -52,26 +60,54 @@ class EditorWindow(QMainWindow):
         self.live_preview_timer.setInterval(900)
         self.live_preview_timer.timeout.connect(lambda: self.compile_pdf(auto=True))
         self.status = QStatusBar()
+        self.status.setStyleSheet(
+            "QStatusBar { background: #ffffff; color: #0b172a; padding-left: 8px; border-top: 1px solid #dbe2ec; }"
+        )
         self.setStatusBar(self.status)
 
         self._create_actions()
+        self._create_menus()
         self._create_toolbar()
+        self._create_context_menu()
         self.editor.textChanged.connect(self._schedule_live_preview)
         self._update_title()
 
+    def _apply_theme(self) -> None:
+        base_font = QFont("Inter", 11)
+        base_font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        QApplication.instance().setFont(base_font)
+
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor("#f3f6fb"))
+        palette.setColor(QPalette.WindowText, QColor("#1f2937"))
+        palette.setColor(QPalette.Base, QColor("#f8fafc"))
+        palette.setColor(QPalette.AlternateBase, QColor("#e9eef5"))
+        palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+        palette.setColor(QPalette.ToolTipText, QColor("#1f2937"))
+        palette.setColor(QPalette.Text, QColor("#111827"))
+        palette.setColor(QPalette.Button, QColor("#0a66c2"))
+        palette.setColor(QPalette.ButtonText, QColor("#ffffff"))
+        palette.setColor(QPalette.Highlight, QColor("#0a66c2"))
+        palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+        palette.setColor(QPalette.Link, QColor("#0a66c2"))
+        self.setPalette(palette)
+
     def _style_editor(self) -> None:
-        font = QFont("Fira Code", 12)
+        font = QFont("JetBrains Mono", 12)
         font.setStyleHint(QFont.Monospace)
         self.editor.setFont(font)
         palette = self.editor.palette()
-        palette.setColor(QPalette.Base, QColor("#0f111a"))
-        palette.setColor(QPalette.Text, QColor("#e5e9f0"))
-        palette.setColor(QPalette.Highlight, QColor("#4c566a"))
-        palette.setColor(QPalette.HighlightedText, QColor("#eceff4"))
+        palette.setColor(QPalette.Base, QColor("#f8fafc"))
+        palette.setColor(QPalette.Text, QColor("#0b172a"))
+        palette.setColor(QPalette.Highlight, QColor("#0a66c2"))
+        palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         self.editor.setPalette(palette)
         self.editor.setStyleSheet(
-            "QTextEdit { padding: 12px; border: none; }"
-            "QScrollBar:vertical { background: #1b1f2a; width: 12px; }"
+            "QTextEdit { padding: 14px; border: 1px solid #dbe2ec; border-radius: 10px; }"
+            "QTextEdit:focus { border: 1px solid #0a66c2; box-shadow: 0 0 0 3px rgba(10,102,194,0.18); }"
+            "QScrollBar:vertical { background: #e9eef5; width: 12px; border-radius: 6px; }"
+            "QScrollBar::handle:vertical { background: #0a66c2; min-height: 30px; border-radius: 6px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
 
     def _create_actions(self) -> None:
@@ -136,6 +172,46 @@ class EditorWindow(QMainWindow):
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about)
 
+    def _create_menus(self) -> None:
+        menu_bar = QMenuBar(self)
+        file_menu = menu_bar.addMenu("File")
+        file_menu.addAction(self.new_action)
+        file_menu.addAction(self.open_action)
+        file_menu.addAction(self.save_action)
+        file_menu.addAction(self.save_as_action)
+
+        project_menu = menu_bar.addMenu("Project")
+        project_menu.addAction(self.new_project_action)
+        project_menu.addAction(self.open_project_action)
+        project_menu.addAction(self.template_action)
+
+        insert_menu = menu_bar.addMenu("Insert")
+        insert_menu.addAction(self.section_action)
+        insert_menu.addAction(self.figure_action)
+        insert_menu.addAction(self.table_action)
+        insert_menu.addAction(self.bibliography_action)
+        insert_menu.addAction(self.equation_action)
+        insert_menu.addAction(self.list_action)
+        insert_menu.addAction(self.toc_action)
+        insert_menu.addAction(self.theorem_action)
+        insert_menu.addAction(self.code_action)
+
+        preview_menu = menu_bar.addMenu("Preview")
+        preview_menu.addAction(self.compile_action)
+        preview_menu.addAction(self.live_preview_action)
+        preview_menu.addAction(self.open_pdf_action)
+
+        help_menu = menu_bar.addMenu("Help")
+        help_menu.addAction(self.about_action)
+        menu_bar.setStyleSheet(
+            "QMenuBar { background: #ffffff; border-bottom: 1px solid #dbe2ec; }"
+            "QMenuBar::item { padding: 6px 10px; margin: 2px; }"
+            "QMenuBar::item:selected { background: #e9eef5; color: #0a66c2; border-radius: 6px; }"
+            "QMenu { background: #ffffff; border: 1px solid #dbe2ec; }"
+            "QMenu::item:selected { background: #e9eef5; color: #0a66c2; }"
+        )
+        self.setMenuBar(menu_bar)
+
     def _create_toolbar(self) -> None:
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
@@ -163,13 +239,66 @@ class EditorWindow(QMainWindow):
         toolbar.addAction(self.code_action)
         toolbar.addSeparator()
         toolbar.addAction(self.about_action)
+        snippet_menu = QMenu("Insert Snippet", self)
+        for action in (
+            self.figure_action,
+            self.table_action,
+            self.bibliography_action,
+            self.section_action,
+            self.equation_action,
+            self.list_action,
+            self.toc_action,
+            self.theorem_action,
+            self.code_action,
+        ):
+            snippet_menu.addAction(action)
+
+        snippet_button = QToolButton()
+        snippet_button.setText("Snippets")
+        snippet_button.setMenu(snippet_menu)
+        snippet_button.setPopupMode(QToolButton.InstantPopup)
+        snippet_button.setStyleSheet(
+            "QToolButton { background: #0a66c2; color: white; padding: 8px 12px;"
+            " border-radius: 8px; font-weight: 600; letter-spacing: 0.3px; }"
+            "QToolButton::menu-indicator { image: none; }"
+            "QToolButton:hover { background: #004182; }"
+        )
+        toolbar.addWidget(snippet_button)
+
         toolbar.setStyleSheet(
-            "QToolBar { background: #161925; spacing: 8px; padding: 6px; }"
-            "QToolButton { color: #e5e9f0; padding: 6px 10px; border-radius: 6px; }"
-            "QToolButton:hover { background: #23283b; }"
-            "QToolButton:checked { background: #3b4252; }"
+            "QToolBar { background: #ffffff; spacing: 8px; padding: 8px; border-bottom: 1px solid #dbe2ec; }"
+            "QToolButton { color: #0b172a; padding: 7px 10px; border-radius: 8px; }"
+            "QToolButton:hover { background: #e9eef5; }"
+            "QToolButton:checked { background: #d7e7fb; color: #0a66c2; }"
         )
         self.addToolBar(toolbar)
+
+    def _create_context_menu(self) -> None:
+        self.editor.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.editor.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _show_context_menu(self, pos: QPoint) -> None:
+        menu = self.editor.createStandardContextMenu()
+        menu.addSeparator()
+        menu.addAction(self.compile_action)
+        menu.addAction(self.live_preview_action)
+        menu.addAction(self.open_pdf_action)
+
+        snippet_menu = QMenu("Insert snippet", self)
+        for action in (
+            self.section_action,
+            self.figure_action,
+            self.table_action,
+            self.equation_action,
+            self.list_action,
+            self.bibliography_action,
+            self.toc_action,
+            self.theorem_action,
+            self.code_action,
+        ):
+            snippet_menu.addAction(action)
+        menu.addMenu(snippet_menu)
+        menu.exec(self.editor.mapToGlobal(pos))
 
     def _update_title(self) -> None:
         filename = self.current_file.name if self.current_file else "Untitled.tex"
