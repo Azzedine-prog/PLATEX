@@ -77,18 +77,3 @@ launch_app() {
 
 banner() {
   cat <<'EOF'
-========================================
-PLATEX is ready.
-Close this terminal to exit the app.
-========================================
-EOF
-}
-
-ensure_git
-ensure_python
-clone_repo
-install_deps
-build_if_possible
-banner
-launch_app
-wait
