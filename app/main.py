@@ -4,8 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFile, QTextStream
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QFile, QTimer, QTextStream
+from PySide6.QtGui import QAction, QColor, QFont, QPalette
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
@@ -29,6 +29,7 @@ class EditorWindow(QMainWindow):
 
         self.editor = QTextEdit()
         self.editor.setTabStopDistance(32)
+        self._style_editor()
 
         self.preview_document = QPdfDocument(self)
         self.preview = QPdfView()
@@ -44,12 +45,34 @@ class EditorWindow(QMainWindow):
         self.current_file: Path | None = None
         self.project_root: Path | None = None
         self.last_pdf_output: Path | None = None
+        self.is_compiling = False
+        self.live_preview_enabled = True
+        self.live_preview_timer = QTimer(self)
+        self.live_preview_timer.setSingleShot(True)
+        self.live_preview_timer.setInterval(900)
+        self.live_preview_timer.timeout.connect(lambda: self.compile_pdf(auto=True))
         self.status = QStatusBar()
         self.setStatusBar(self.status)
 
         self._create_actions()
         self._create_toolbar()
+        self.editor.textChanged.connect(self._schedule_live_preview)
         self._update_title()
+
+    def _style_editor(self) -> None:
+        font = QFont("Fira Code", 12)
+        font.setStyleHint(QFont.Monospace)
+        self.editor.setFont(font)
+        palette = self.editor.palette()
+        palette.setColor(QPalette.Base, QColor("#0f111a"))
+        palette.setColor(QPalette.Text, QColor("#e5e9f0"))
+        palette.setColor(QPalette.Highlight, QColor("#4c566a"))
+        palette.setColor(QPalette.HighlightedText, QColor("#eceff4"))
+        self.editor.setPalette(palette)
+        self.editor.setStyleSheet(
+            "QTextEdit { padding: 12px; border: none; }"
+            "QScrollBar:vertical { background: #1b1f2a; width: 12px; }"
+        )
 
     def _create_actions(self) -> None:
         self.new_project_action = QAction("New Project Folder", self)
@@ -73,6 +96,10 @@ class EditorWindow(QMainWindow):
         self.compile_action = QAction("Compile PDF", self)
         self.compile_action.triggered.connect(self.compile_pdf)
 
+        self.live_preview_action = QAction("Live Preview", self, checkable=True)
+        self.live_preview_action.setChecked(True)
+        self.live_preview_action.triggered.connect(self._toggle_live_preview)
+
         self.template_action = QAction("New from Template", self)
         self.template_action.triggered.connect(self.new_from_template)
 
@@ -94,6 +121,15 @@ class EditorWindow(QMainWindow):
         self.list_action = QAction("Insert List", self)
         self.list_action.triggered.connect(lambda: self.insert_snippet("list"))
 
+        self.toc_action = QAction("Insert TOC", self)
+        self.toc_action.triggered.connect(lambda: self.insert_snippet("toc"))
+
+        self.theorem_action = QAction("Insert Theorem", self)
+        self.theorem_action.triggered.connect(lambda: self.insert_snippet("theorem"))
+
+        self.code_action = QAction("Insert Code", self)
+        self.code_action.triggered.connect(lambda: self.insert_snippet("code"))
+
         self.open_pdf_action = QAction("Open PDF Externally", self)
         self.open_pdf_action.triggered.connect(self.open_pdf_externally)
 
@@ -113,6 +149,7 @@ class EditorWindow(QMainWindow):
         toolbar.addAction(self.save_as_action)
         toolbar.addSeparator()
         toolbar.addAction(self.compile_action)
+        toolbar.addAction(self.live_preview_action)
         toolbar.addAction(self.open_pdf_action)
         toolbar.addSeparator()
         toolbar.addAction(self.figure_action)
@@ -121,13 +158,35 @@ class EditorWindow(QMainWindow):
         toolbar.addAction(self.section_action)
         toolbar.addAction(self.equation_action)
         toolbar.addAction(self.list_action)
+        toolbar.addAction(self.toc_action)
+        toolbar.addAction(self.theorem_action)
+        toolbar.addAction(self.code_action)
         toolbar.addSeparator()
         toolbar.addAction(self.about_action)
+        toolbar.setStyleSheet(
+            "QToolBar { background: #161925; spacing: 8px; padding: 6px; }"
+            "QToolButton { color: #e5e9f0; padding: 6px 10px; border-radius: 6px; }"
+            "QToolButton:hover { background: #23283b; }"
+            "QToolButton:checked { background: #3b4252; }"
+        )
         self.addToolBar(toolbar)
 
     def _update_title(self) -> None:
         filename = self.current_file.name if self.current_file else "Untitled.tex"
         self.setWindowTitle(f"PLATEX – {filename}")
+
+    def _schedule_live_preview(self) -> None:
+        if not self.live_preview_enabled:
+            return
+        self.live_preview_timer.start()
+
+    def _toggle_live_preview(self, enabled: bool) -> None:
+        self.live_preview_enabled = enabled
+        if enabled:
+            self.status.showMessage("Live preview on – compiling after edits", 2000)
+            self._schedule_live_preview()
+        else:
+            self.status.showMessage("Live preview paused", 2000)
 
     def new_file(self) -> None:
         if self._confirm_discard_changes():
@@ -324,11 +383,14 @@ Content goes here.
         )
         return reply == QMessageBox.Yes
 
-    def compile_pdf(self) -> None:
+    def compile_pdf(self, auto: bool = False) -> None:
+        if self.is_compiling:
+            return
+        self.is_compiling = True
         if not self.current_file:
-            self.save_file(save_as=True)
-            if not self.current_file:
-                return
+            base = self.project_root or Path.home() / "PLATEX"
+            base.mkdir(parents=True, exist_ok=True)
+            self.current_file = base / "main.tex"
 
         assert self.current_file is not None
         self.save_file()
@@ -341,15 +403,18 @@ Content goes here.
             self.status.showMessage("Preparing LaTeX toolchain…", 4000)
             command = self._install_toolchain()
         if not command:
-            QMessageBox.warning(
-                self,
-                "Compiler missing",
-                "No LaTeX compiler was found or could be installed automatically.\n"
-                "Please install TeX Live (macOS/Linux) or MiKTeX (Windows) and try again.",
-            )
+            if not auto:
+                QMessageBox.warning(
+                    self,
+                    "Compiler missing",
+                    "No LaTeX compiler was found or could be installed automatically.\n"
+                    "Please install TeX Live (macOS/Linux) or MiKTeX (Windows) and try again.",
+                )
+            self.is_compiling = False
             return
 
-        self.status.showMessage("Compiling…", 2000)
+        if not auto:
+            self.status.showMessage("Compiling…", 2000)
         env = os.environ.copy()
         env.setdefault("MIKTEX_AUTOINSTALL", "1")
         env.setdefault("MIKTEX_ON_THE_FLY", "1")
@@ -371,30 +436,33 @@ Content goes here.
                 env=env,
             )
         except subprocess.TimeoutExpired:
-            QMessageBox.critical(self, "Timeout", "Compilation took too long and was stopped.")
+            if not auto:
+                QMessageBox.critical(self, "Timeout", "Compilation took too long and was stopped.")
+            self.is_compiling = False
             return
         except OSError as exc:
-            QMessageBox.critical(self, "Error", f"Failed to run compiler: {exc}")
+            if not auto:
+                QMessageBox.critical(self, "Error", f"Failed to run compiler: {exc}")
+            self.is_compiling = False
             return
 
         if result.returncode == 0 and pdf_output.exists():
-            self.status.showMessage("Compilation successful (preview refreshed)", 4000)
+            self.status.showMessage("Compilation successful (preview refreshed)", 2000)
             self._load_preview(pdf_output)
         else:
-            QMessageBox.critical(self, "Compilation failed", result.stdout or "No output")
+            if not auto:
+                QMessageBox.critical(self, "Compilation failed", result.stdout or "No output")
+            else:
+                self.status.showMessage("Live preview compile failed – check document", 3000)
+        self.is_compiling = False
 
     def _load_preview(self, pdf_output: Path) -> None:
         load_status = self.preview_document.load(str(pdf_output))
         if load_status == QPdfDocument.Status.Ready:
             self.preview.setPageMode(QPdfView.PageMode.MultiPage)
             self.preview.update()
-        else:
-            QMessageBox.warning(
-                self,
-                "Preview unavailable",
-                "Compiled PDF was saved but the in-app preview could not load it."
-                " Use 'Open PDF Externally' if you need the file.",
-            )
+            return
+        self.status.showMessage("Preview unavailable – PDF saved to disk", 4000)
 
     def open_pdf_externally(self) -> None:
         if not self.last_pdf_output or not self.last_pdf_output.exists():
@@ -515,6 +583,24 @@ E = mc^2
   \item First item
   \item Second item
 \\end{itemize}
+
+""",
+            "toc": """% Table of contents
+\\tableofcontents
+\\newpage
+
+""",
+            "theorem": """% Add to preamble: \\usepackage{amsthm}
+\\begin{theorem}[Sample]
+Let a, b \in \mathbb{R}. Then a + b = b + a.
+\\end{theorem}
+
+""",
+            "code": """% Add to preamble: \\usepackage{listings}
+\\begin{lstlisting}[language=Python, caption={Example code}]
+def hello():
+    print("Hello, PLATEX!")
+\\end{lstlisting}
 
 """,
         }

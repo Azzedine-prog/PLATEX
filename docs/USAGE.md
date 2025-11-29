@@ -10,7 +10,8 @@
    - Use **New from Template** to start with article/report/beamer layouts.
 
 3. **Compile to PDF & preview**
-   - Click **Compile PDF** to build and refresh the live preview pane. The app searches for `latexmk`, `pdflatex`, or `xelatex` in your PATH and installs a toolchain automatically if missing.
+   - Live preview is on by default: keep typing and the PDF pane refreshes automatically after a short pause. Click **Live Preview** on the toolbar to pause/resume auto-compiles.
+   - Click **Compile PDF** anytime for an immediate rebuild. The app searches for `latexmk`, `pdflatex`, or `xelatex` in your PATH and installs a toolchain automatically if missing.
    - The preview stays inside PLATEX; no external viewer is launched unless you click **Open PDF Externally** after a successful compile.
 
 4. **Need a single executable?**
@@ -23,5 +24,5 @@
 
 ## Tips
 - Keep your `.tex` files in a simple folder without spaces to avoid path issues on some TeX engines.
-- Use the snippet buttons (figure, table, bibliography, section, equation, list) for quick Overleaf-style inserts.
+- Use the snippet buttons (figure, table, bibliography, section, equation, list, TOC, theorem, code) for quick Overleaf-style inserts.
 - If compilation hangs, rerun the setup script so it can refresh/update the LaTeX distribution automatically.
