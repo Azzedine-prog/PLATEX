@@ -3,11 +3,11 @@
 PLATEX is now a simple, cross-platform desktop LaTeX editor built with Python and Qt. It saves `.tex` files locally and can call your installed LaTeX distribution (TeX Live or MiKTeX) to produce PDFs. Everything ships as a single runnable application that you can launch directly or package via PyInstaller.
 
 ## What you get
-- A friendly Qt editor with open/save, toolbar shortcuts, a one-click **Compile PDF** button, and a built-in split-view PDF preview.
+- A friendly Qt editor with open/save, toolbar shortcuts, **project folders**, a one-click **Compile PDF** button, and a built-in split-view PDF preview (no external viewer pops up unless you ask).
 - Automatic detection of `latexmk`, `pdflatex`, or `xelatex` (whichever is available) with silent one-time installation when missing.
 - Double-click installers for Windows plus single-command setup for macOS/Linux.
 - One-file binary builds via PyInstaller (`platex.exe` on Windows, `platex` on macOS/Linux).
-- Starter templates (article/report/beamer) and quick-insert snippets for figures, tables, and bibliographies—Overleaf-style convenience without the browser.
+- Starter templates (article/report/beamer) plus Overleaf-style snippets (figures, tables, bibliography, sections, equations, lists) and "New Project" scaffolding with `main.tex`, `references.bib`, and an `images/` folder.
 
 ## Quick start for non-technical users
 ### Windows (double-click)
@@ -40,8 +40,9 @@ python build.py
 pip install -r requirements.txt
 python app/main.py
 ```
-- Hit **Compile PDF** to refresh the live preview alongside the editor pane.
-- Use **New from Template** for an article/report/beamer starter, and the toolbar snippets (figure/table/bibliography) to insert common blocks quickly.
+- Use **New Project Folder** to scaffold a ready-to-edit workspace with `main.tex`, `references.bib`, and `images/`.
+- Hit **Compile PDF** to refresh the live preview alongside the editor pane. Use **Open PDF Externally** when you explicitly want the generated file in your system viewer.
+- Use **New from Template** for an article/report/beamer starter, and the toolbar snippets (figure/table/bibliography/section/equation/list) to insert common blocks quickly.
 
 ## Troubleshooting
 - **"No LaTeX compiler found"**: Re-run the platform script; it now installs TeX Live/MiKTeX automatically when possible.

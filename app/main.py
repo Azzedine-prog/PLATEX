@@ -42,6 +42,8 @@ class EditorWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
         self.current_file: Path | None = None
+        self.project_root: Path | None = None
+        self.last_pdf_output: Path | None = None
         self.status = QStatusBar()
         self.setStatusBar(self.status)
 
@@ -50,6 +52,12 @@ class EditorWindow(QMainWindow):
         self._update_title()
 
     def _create_actions(self) -> None:
+        self.new_project_action = QAction("New Project Folder", self)
+        self.new_project_action.triggered.connect(self.create_project)
+
+        self.open_project_action = QAction("Open Project Folder", self)
+        self.open_project_action.triggered.connect(self.open_project)
+
         self.new_action = QAction("New", self)
         self.new_action.triggered.connect(self.new_file)
 
@@ -77,12 +85,27 @@ class EditorWindow(QMainWindow):
         self.bibliography_action = QAction("Insert Bibliography", self)
         self.bibliography_action.triggered.connect(lambda: self.insert_snippet("bibliography"))
 
+        self.section_action = QAction("Insert Section", self)
+        self.section_action.triggered.connect(lambda: self.insert_snippet("section"))
+
+        self.equation_action = QAction("Insert Equation", self)
+        self.equation_action.triggered.connect(lambda: self.insert_snippet("equation"))
+
+        self.list_action = QAction("Insert List", self)
+        self.list_action.triggered.connect(lambda: self.insert_snippet("list"))
+
+        self.open_pdf_action = QAction("Open PDF Externally", self)
+        self.open_pdf_action.triggered.connect(self.open_pdf_externally)
+
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about)
 
     def _create_toolbar(self) -> None:
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
+        toolbar.addAction(self.new_project_action)
+        toolbar.addAction(self.open_project_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.new_action)
         toolbar.addAction(self.template_action)
         toolbar.addAction(self.open_action)
@@ -90,10 +113,14 @@ class EditorWindow(QMainWindow):
         toolbar.addAction(self.save_as_action)
         toolbar.addSeparator()
         toolbar.addAction(self.compile_action)
+        toolbar.addAction(self.open_pdf_action)
         toolbar.addSeparator()
         toolbar.addAction(self.figure_action)
         toolbar.addAction(self.table_action)
         toolbar.addAction(self.bibliography_action)
+        toolbar.addAction(self.section_action)
+        toolbar.addAction(self.equation_action)
+        toolbar.addAction(self.list_action)
         toolbar.addSeparator()
         toolbar.addAction(self.about_action)
         self.addToolBar(toolbar)
@@ -105,9 +132,90 @@ class EditorWindow(QMainWindow):
     def new_file(self) -> None:
         if self._confirm_discard_changes():
             self.editor.clear()
-            self.current_file = None
+            if self.project_root:
+                self.current_file = self.project_root / "main.tex"
+            else:
+                self.current_file = None
+            self.last_pdf_output = None
             self._update_title()
             self.status.showMessage("New file created", 2000)
+
+    def create_project(self) -> None:
+        base_dir = QFileDialog.getExistingDirectory(self, "Choose where to create your project")
+        if not base_dir:
+            return
+
+        project_name, ok = QInputDialog.getText(self, "Project name", "Name your project")
+        if not ok or not project_name.strip():
+            return
+
+        target = Path(base_dir) / project_name.strip()
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "images").mkdir(exist_ok=True)
+        except OSError as exc:
+            QMessageBox.critical(self, "Error", f"Could not create project folder: {exc}")
+            return
+
+        main_tex = target / "main.tex"
+        bib_file = target / "references.bib"
+        if not main_tex.exists():
+            main_tex.write_text(
+                """\\documentclass{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{graphicx}
+\\title{Project Title}
+\\author{Your Name}
+\\begin{document}
+\\maketitle
+
+\\section{Overview}
+Welcome to your new PLATEX project. Add sections, figures, and more from the toolbar.
+
+\\section{Next steps}
+\\begin{itemize}
+  \item Add images to the images/ folder and reference them with \includegraphics.
+  \item Insert figures, tables, and bibliography snippets from the toolbar.
+  \item Compile to preview the PDF on the right.
+\\end{itemize}
+
+\\bibliographystyle{plain}
+\\bibliography{references}
+\\end{document}
+""",
+                encoding="utf-8",
+            )
+
+        if not bib_file.exists():
+            bib_file.write_text(
+                """@article{example,
+  title={Getting Started with PLATEX},
+  author={Author, A.},
+  journal={Journal of Examples},
+  year={2024}
+}
+""",
+                encoding="utf-8",
+            )
+
+        self.project_root = target
+        self._load_file(main_tex)
+        self.status.showMessage(f"Project created at {target}", 4000)
+
+    def open_project(self) -> None:
+        target = QFileDialog.getExistingDirectory(self, "Open project folder")
+        if not target:
+            return
+
+        project_path = Path(target)
+        tex_files = list(project_path.glob("*.tex"))
+        if not tex_files:
+            QMessageBox.information(self, "No TeX file", "That folder has no .tex files to open.")
+            return
+
+        self.project_root = project_path
+        self._load_file(tex_files[0])
+        self.status.showMessage(f"Opened project {project_path}", 3000)
 
     def new_from_template(self) -> None:
         if not self._confirm_discard_changes():
@@ -165,7 +273,10 @@ Content goes here.
             self.status.showMessage(f"Loaded {name} template", 2000)
 
     def open_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open LaTeX File", "", "TeX Files (*.tex);;All Files (*)")
+        start_dir = str(self.project_root) if self.project_root else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open LaTeX File", start_dir, "TeX Files (*.tex);;All Files (*)"
+        )
         if path:
             self._load_file(Path(path))
 
@@ -178,12 +289,19 @@ Content goes here.
         self.editor.setPlainText(stream.readAll())
         file.close()
         self.current_file = path
+        self.last_pdf_output = None
         self._update_title()
         self.status.showMessage(f"Opened {path}", 2000)
 
     def save_file(self, save_as: bool = False) -> None:
         if save_as or not self.current_file:
-            path, _ = QFileDialog.getSaveFileName(self, "Save LaTeX File", "Untitled.tex", "TeX Files (*.tex);;All Files (*)")
+            default_dir = str(self.project_root) if self.project_root else ""
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save LaTeX File",
+                os.path.join(default_dir, "Untitled.tex") if default_dir else "Untitled.tex",
+                "TeX Files (*.tex);;All Files (*)",
+            )
             if not path:
                 return
             self.current_file = Path(path)
@@ -216,6 +334,7 @@ Content goes here.
         self.save_file()
         tex_file = self.current_file
         pdf_output = tex_file.with_suffix(".pdf")
+        self.last_pdf_output = pdf_output
 
         command = self._detect_compiler()
         if not command:
@@ -259,7 +378,7 @@ Content goes here.
             return
 
         if result.returncode == 0 and pdf_output.exists():
-            self.status.showMessage(f"Compilation successful → {pdf_output}", 4000)
+            self.status.showMessage("Compilation successful (preview refreshed)", 4000)
             self._load_preview(pdf_output)
         else:
             QMessageBox.critical(self, "Compilation failed", result.stdout or "No output")
@@ -268,16 +387,25 @@ Content goes here.
         load_status = self.preview_document.load(str(pdf_output))
         if load_status == QPdfDocument.Status.Ready:
             self.preview.setPageMode(QPdfView.PageMode.MultiPage)
-            QMessageBox.information(self, "Success", f"PDF created: {pdf_output}")
+            self.preview.update()
         else:
             QMessageBox.warning(
                 self,
                 "Preview unavailable",
-                f"Compiled PDF saved to {pdf_output}, but the in-app preview could not be loaded.",
+                "Compiled PDF was saved but the in-app preview could not load it."
+                " Use 'Open PDF Externally' if you need the file.",
             )
-            self._open_file(pdf_output)
 
-    def _open_file(self, path: Path) -> None:
+    def open_pdf_externally(self) -> None:
+        if not self.last_pdf_output or not self.last_pdf_output.exists():
+            QMessageBox.information(
+                self,
+                "No PDF yet",
+                "Compile your document first, then click this to open the generated PDF.",
+            )
+            return
+
+        path = self.last_pdf_output
         try:
             if sys.platform.startswith("darwin"):
                 subprocess.run(["open", str(path)], check=False)
@@ -373,6 +501,21 @@ Content goes here.
 %   journal={Journal},
 %   year={2024}
 % }
+""",
+            "section": """\\section{New Section}
+Write your section text here.
+
+""",
+            "equation": """\\begin{equation}
+E = mc^2
+\\end{equation}
+
+""",
+            "list": """\\begin{itemize}
+  \item First item
+  \item Second item
+\\end{itemize}
+
 """,
         }
 
