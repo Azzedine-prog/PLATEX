@@ -213,19 +213,21 @@ class LatexChatAssistant:
         if not self.available:
             return None
 
-        texts = [
-            "how do i add a figure",  # figure intent
-            "how to cite bibliography",  # bibliography intent
-            "my latex compile failed",  # compile intent
-            "section organization help",  # structure intent
-            "write an abstract",  # writing intent
-            "figure placement",  # figure intent
-            "bibtex missing entry",  # bibliography intent
-            "pdflatex error",  # compile intent
-            "improve conclusion text",  # writing intent
-            "create table environment",  # structure intent
-        ]
-        labels = [0, 1, 2, 3, 4, 0, 1, 2, 4, 3]
+        texts = tf.constant(
+            [
+                "how do i add a figure",  # figure intent
+                "how to cite bibliography",  # bibliography intent
+                "my latex compile failed",  # compile intent
+                "section organization help",  # structure intent
+                "write an abstract",  # writing intent
+                "figure placement",  # figure intent
+                "bibtex missing entry",  # bibliography intent
+                "pdflatex error",  # compile intent
+                "improve conclusion text",  # writing intent
+                "create table environment",  # structure intent
+            ]
+        )
+        labels = tf.constant([0, 1, 2, 3, 4, 0, 1, 2, 4, 3], dtype=tf.int32)
         intents = ["figures", "references", "compile", "structure", "writing"]
 
         vectorizer = layers.TextVectorization(
