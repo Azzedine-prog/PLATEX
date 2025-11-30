@@ -283,11 +283,13 @@ class LatexChatAssistant:
         if not prompt.strip():
             return "Ask anything about your LaTeX document, structure, or errors."
 
+        # Fast heuristic fallback if TensorFlow is missing or still loading.
+        def fallback() -> str:
+            intent = self._fallback_intent(prompt)
+            return self._intent_to_message(intent, prompt, document)
+
         if not self.available:
-            return (
-                "TensorFlow is not installed. Install requirements.txt to enable the smart assistant. "
-                "Meanwhile, use the toolbar snippets and live preview for guidance."
-            )
+            return fallback()
 
         if self.model is None:
             return "Assistant is preparing the model. Try again in a moment."
@@ -298,10 +300,19 @@ class LatexChatAssistant:
             intent = ["figures", "references", "compile", "structure", "writing"][intent_idx]
             return self._intent_to_message(intent, prompt, document)
         except Exception:
-            return (
-                "Could not run the TensorFlow model right now. Use the Help menu for quick fixes "
-                "or try again after reopening the app."
-            )
+            return fallback()
+
+    def _fallback_intent(self, prompt: str) -> str:
+        text = prompt.lower()
+        if any(keyword in text for keyword in ["figure", "image", "includegraphics", "graphic"]):
+            return "figures"
+        if any(keyword in text for keyword in ["cite", "bib", "reference", "bibliography"]):
+            return "references"
+        if any(keyword in text for keyword in ["error", "compile", "log", "latexmk", "pdflatex"]):
+            return "compile"
+        if any(keyword in text for keyword in ["section", "structure", "organization", "toc", "outline"]):
+            return "structure"
+        return "writing"
 
 
 class ChatDialog(QDialog):
@@ -1466,7 +1477,10 @@ def hello():
         doc_text = self._current_editor().toPlainText()
 
         def worker() -> None:
-            reply = self.assistant.respond(prompt, doc_text)
+            try:
+                reply = self.assistant.respond(prompt, doc_text)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                reply = f"Assistant hit a snag: {exc}. Try again or reopen the app."
             QTimer.singleShot(0, lambda: self._append_assistant_reply(reply))
 
         threading.Thread(target=worker, daemon=True).start()
