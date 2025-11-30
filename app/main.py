@@ -35,6 +35,21 @@ class EditorWindow(QMainWindow):
 
         self._apply_theme()
 
+        self.current_file: Path | None = None
+        self.project_root: Path | None = None
+        self.last_pdf_output: Path | None = None
+        self.is_compiling = False
+        self.live_preview_enabled = True
+        self.live_preview_timer = QTimer(self)
+        self.live_preview_timer.setSingleShot(True)
+        self.live_preview_timer.setInterval(900)
+        self.live_preview_timer.timeout.connect(lambda: self.compile_pdf(auto=True))
+        self.status = QStatusBar()
+        self.status.setStyleSheet(
+            "QStatusBar { background: #ffffff; color: #0b172a; padding-left: 8px; border-top: 1px solid #dbe2ec; }"
+        )
+        self.setStatusBar(self.status)
+
         self.preview_document = QPdfDocument(self)
         self.preview = QPdfView()
         self.preview.setDocument(self.preview_document)
@@ -49,7 +64,8 @@ class EditorWindow(QMainWindow):
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._tab_changed)
         first_editor = self._create_editor_widget()
-        self.tabs.addTab(first_editor, "Untitled.tex")
+        first_index = self.tabs.addTab(first_editor, "Untitled.tex")
+        self._set_tab_path(first_index, None)
 
         self.file_model = QFileSystemModel()
         self.file_model.setRootPath(str(Path.home()))
@@ -69,21 +85,6 @@ class EditorWindow(QMainWindow):
         splitter.addWidget(self.preview)
         splitter.setSizes([200, 520, 280])
         self.setCentralWidget(splitter)
-
-        self.current_file: Path | None = None
-        self.project_root: Path | None = None
-        self.last_pdf_output: Path | None = None
-        self.is_compiling = False
-        self.live_preview_enabled = True
-        self.live_preview_timer = QTimer(self)
-        self.live_preview_timer.setSingleShot(True)
-        self.live_preview_timer.setInterval(900)
-        self.live_preview_timer.timeout.connect(lambda: self.compile_pdf(auto=True))
-        self.status = QStatusBar()
-        self.status.setStyleSheet(
-            "QStatusBar { background: #ffffff; color: #0b172a; padding-left: 8px; border-top: 1px solid #dbe2ec; }"
-        )
-        self.setStatusBar(self.status)
 
         self._create_actions()
         self._create_menus()
@@ -122,7 +123,7 @@ class EditorWindow(QMainWindow):
         editor.setPalette(palette)
         editor.setStyleSheet(
             "QTextEdit { padding: 14px; border: 1px solid #dbe2ec; border-radius: 10px; }"
-            "QTextEdit:focus { border: 1px solid #0a66c2; box-shadow: 0 0 0 3px rgba(10,102,194,0.18); }"
+            "QTextEdit:focus { border: 1px solid #0a66c2; }"
             "QScrollBar:vertical { background: #e9eef5; width: 12px; border-radius: 6px; }"
             "QScrollBar::handle:vertical { background: #0a66c2; min-height: 30px; border-radius: 6px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
@@ -355,11 +356,11 @@ class EditorWindow(QMainWindow):
 
     def _tab_path(self, index: int | None = None) -> Path | None:
         idx = self.tabs.currentIndex() if index is None else index
-        data = self.tabs.tabData(idx)
+        data = self.tabs.tabBar().tabData(idx)
         return Path(data) if data else None
 
     def _set_tab_path(self, index: int, path: Path | None) -> None:
-        self.tabs.setTabData(index, str(path) if path else None)
+        self.tabs.tabBar().setTabData(index, str(path) if path else None)
         label = path.name if path else "Untitled.tex"
         self.tabs.setTabText(index, label)
         if index == self.tabs.currentIndex():
@@ -369,7 +370,7 @@ class EditorWindow(QMainWindow):
     def _open_editor_tab(self, path: Path | None, content: str) -> None:
         if path:
             for i in range(self.tabs.count()):
-                if self.tabs.tabData(i) == str(path):
+                if self.tabs.tabBar().tabData(i) == str(path):
                     self.tabs.setCurrentIndex(i)
                     return
         editor = self._create_editor_widget()
