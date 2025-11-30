@@ -17,15 +17,15 @@
 
 4. **Faster authoring**
    - Right-click inside the editor to open the context menu: insert Overleaf-style snippets or **Add Figure from File** (copies your chosen image into the project `images/` folder and injects the LaTeX block).
-   - Use **Find…** from the Edit menu or toolbar to search within the current file.
-   - Use **Ask Document Assistant** from the Help menu to open the chat panel. It runs a tiny TensorFlow model locally (downloaded or trained on first run) to give figure/structure/compile tips without leaving your machine.
+- Use **Find…** from the Edit menu or toolbar to search within the current file.
+- Use **Ask Document Assistant** from the Help menu to open the chat panel. It runs a tiny TensorFlow model locally (trained on first run). If TensorFlow is unavailable, the assistant still answers using built-in heuristics—no internet needed.
 
 5. **Need a single executable?**
    - Run `python build.py` after installing dependencies to create `dist/platex` (or `dist/platex.exe` on Windows).
 
 ## Requirements
 - Python 3.10+
-- TensorFlow runtime (installed via `pip install -r requirements.txt`)
+- TensorFlow runtime (installed via `pip install -r requirements.txt`; if you skip it, the assistant will still reply with heuristics)
 - LaTeX distribution with `latexmk`, `pdflatex`, or `xelatex` (setup scripts install TeX Live/MiKTeX automatically when possible)
 - GUI environment (Qt requires a desktop session)
 

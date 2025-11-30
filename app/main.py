@@ -166,11 +166,6 @@ class LatexChatAssistant:
     deterministic hints so the UI continues to work for every user.
     """
 
-    MODEL_URL = (
-        "https://huggingface.co/datasets/hf-internal-testing/tiny-random-distilbert/"
-        "resolve/main/README.md"
-    )
-
     def __init__(self, storage_dir: Path | None = None):
         self.available = tf is not None and layers is not None
         self.model_dir = storage_dir or Path.home() / ".platex" / "assistant"
@@ -187,27 +182,11 @@ class LatexChatAssistant:
                 self.model = tf.keras.models.load_model(self.model_path)
                 return
             except Exception:
-                pass
-
-        if self._download_model():
-            try:
-                self.model = tf.keras.models.load_model(self.model_path)
-                return
-            except Exception:
                 self.model_path.unlink(missing_ok=True)
 
+        # Stay offline-first: train a tiny local model instead of attempting any
+        # remote downloads. If training fails, we'll fall back to heuristics.
         self.model = self._train_tiny_model()
-
-    def _download_model(self) -> bool:
-        if not self.available:
-            return False
-        try:
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".keras")
-            urllib.request.urlretrieve(self.MODEL_URL, tmp_file.name)
-            shutil.move(tmp_file.name, self.model_path)
-            return True
-        except Exception:
-            return False
 
     def _train_tiny_model(self):
         if not self.available:
@@ -292,7 +271,7 @@ class LatexChatAssistant:
             return fallback()
 
         if self.model is None:
-            return "Assistant is preparing the model. Try again in a moment."
+            return fallback()
 
         try:
             preds = self.model.predict([prompt], verbose=0)[0]
