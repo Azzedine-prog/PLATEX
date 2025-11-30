@@ -230,42 +230,52 @@ class LatexChatAssistant:
         self.intents = intents
         return model
 
-    def _intent_to_message(self, intent: str, prompt: str, document: str) -> str:
+    def _intent_to_message(
+        self, intent: str, prompt: str, document: str, context_hint: tuple[str, str] | None
+    ) -> str:
         figure_count = len(re.findall(r"\\includegraphics\{[^}]+\}", document))
         section_count = len(re.findall(r"\\section\{[^}]+\}", document))
         compile_errors = re.findall(r"! (.+)", document)
 
         if intent == "figures":
-            return (
+            message = (
                 "Add figures with Insert → Add Figure from File. Store assets in images/ and reference them with "
                 "\\includegraphics. Consider using [h!] to keep placement stable."
             )
-        if intent == "references":
-            return (
+        elif intent == "references":
+            message = (
                 "Keep your references in references.bib and cite with \\cite{key}. Remember to run bibtex via latexmk; "
                 "the Compile PDF button will trigger it automatically."
             )
-        if intent == "compile":
+        elif intent == "compile":
             hint = compile_errors[0] if compile_errors else "Check missing packages or unmatched braces."
-            return f"Compilation tips: {hint} — ensure your preamble loads needed packages and rerun Compile PDF."
-        if intent == "structure":
-            return (
+            message = f"Compilation tips: {hint} — ensure your preamble loads needed packages and rerun Compile PDF."
+        elif intent == "structure":
+            message = (
                 f"You currently have {section_count} sections. Consider an introduction, methods, results, and "
                 "conclusion flow. Use Insert → Section to add new structure quickly."
             )
-        return (
-            "Tighten your writing: keep paragraphs short, use \\textbf for emphasis, and ensure every figure has a "
-            "clear caption. Ask for compile to preview the result."
-        )
+        else:
+            message = (
+                "Tighten your writing: keep paragraphs short, use \\textbf for emphasis, and ensure every figure has a "
+                "clear caption. Ask for compile to preview the result."
+            )
 
-    def respond(self, prompt: str, document: str) -> str:
+        if context_hint:
+            file_label, snippet = context_hint
+            message += f"\n\nContext from {file_label}:\n{snippet}"
+        return message
+
+    def respond(self, prompt: str, document: str, project_context: str = "") -> str:
         if not prompt.strip():
             return "Ask anything about your LaTeX document, structure, or errors."
+
+        context_hint = self._extract_context_hint(prompt, project_context or document)
 
         # Fast heuristic fallback if TensorFlow is missing or still loading.
         def fallback() -> str:
             intent = self._fallback_intent(prompt)
-            return self._intent_to_message(intent, prompt, document)
+            return self._intent_to_message(intent, prompt, document, context_hint)
 
         if not self.available:
             return fallback()
@@ -277,7 +287,7 @@ class LatexChatAssistant:
             preds = self.model.predict([prompt], verbose=0)[0]
             intent_idx = int(preds.argmax())
             intent = ["figures", "references", "compile", "structure", "writing"][intent_idx]
-            return self._intent_to_message(intent, prompt, document)
+            return self._intent_to_message(intent, prompt, document, context_hint)
         except Exception:
             return fallback()
 
@@ -292,6 +302,33 @@ class LatexChatAssistant:
         if any(keyword in text for keyword in ["section", "structure", "organization", "toc", "outline"]):
             return "structure"
         return "writing"
+
+    def _extract_context_hint(self, prompt: str, context_text: str) -> tuple[str, str] | None:
+        if not context_text.strip():
+            return None
+
+        tokens = [t for t in re.findall(r"[A-Za-z]{3,}", prompt.lower())]
+        if not tokens:
+            return None
+
+        best: tuple[str, str, int] | None = None
+        for block in context_text.split("FILE: "):
+            block = block.strip()
+            if not block:
+                continue
+            lines = block.split("\n", 1)
+            file_label = lines[0].strip()
+            snippet = lines[1] if len(lines) > 1 else ""
+            haystack = snippet.lower()
+            score = sum(haystack.count(token) for token in tokens)
+            if score == 0:
+                continue
+            if best is None or score > best[2]:
+                best = (file_label, snippet.strip()[:600], score)
+
+        if best:
+            return best[0], best[1]
+        return None
 
 
 class ChatDialog(QDialog):
@@ -756,6 +793,29 @@ class EditorWindow(QMainWindow):
         root = str(self.project_root) if self.project_root else str(Path.home())
         self.file_model.setRootPath(root)
         self.file_view.setRootIndex(self.file_model.index(root))
+
+    def _project_context_snapshot(self) -> str:
+        if not self.project_root:
+            return f"FILE: current\n{self._current_editor().toPlainText()}"
+
+        parts: list[str] = []
+        total_chars = 0
+        for path in sorted(self.project_root.rglob("*.tex")):
+            if total_chars > 18000:
+                break
+            if not path.is_file():
+                continue
+            try:
+                data = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            snippet = data[:4000]
+            parts.append(f"FILE: {path.name}\n{snippet}")
+            total_chars += len(snippet)
+
+        if not parts:
+            return f"FILE: current\n{self._current_editor().toPlainText()}"
+        return "\n\n".join(parts)
 
     def _open_from_tree(self, index) -> None:  # type: ignore[override]
         path = Path(self.file_model.filePath(index))
@@ -1454,10 +1514,11 @@ def hello():
             self.chat_dialog.clear_entry()
 
         doc_text = self._current_editor().toPlainText()
+        project_context = self._project_context_snapshot()
 
         def worker() -> None:
             try:
-                reply = self.assistant.respond(prompt, doc_text)
+                reply = self.assistant.respond(prompt, doc_text, project_context)
             except Exception as exc:  # pragma: no cover - defensive guard
                 reply = f"Assistant hit a snag: {exc}. Try again or reopen the app."
             QTimer.singleShot(0, lambda: self._append_assistant_reply(reply))

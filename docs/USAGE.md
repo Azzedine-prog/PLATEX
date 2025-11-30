@@ -18,7 +18,7 @@
 4. **Faster authoring**
    - Right-click inside the editor to open the context menu: insert Overleaf-style snippets or **Add Figure from File** (copies your chosen image into the project `images/` folder and injects the LaTeX block).
 - Use **Find…** from the Edit menu or toolbar to search within the current file.
-- Use **Ask Document Assistant** from the Help menu to open the chat panel. It runs a tiny TensorFlow model locally (trained on first run). If TensorFlow is unavailable, the assistant still answers using built-in heuristics—no internet needed.
+- Use **Ask Document Assistant** from the Help menu to open the chat panel. It runs a tiny TensorFlow model locally (trained on first run). If TensorFlow is unavailable, the assistant still answers using built-in heuristics—no internet needed. The assistant reads your open project’s `.tex` files and quotes the most relevant snippet back in its reply so suggestions stay grounded in your actual document.
 
 5. **Need a single executable?**
    - Run `python build.py` after installing dependencies to create `dist/platex` (or `dist/platex.exe` on Windows).
