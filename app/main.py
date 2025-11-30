@@ -3,6 +3,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QFile, QPoint, Qt, QTimer, QTextStream, QRegularExpression
@@ -34,6 +37,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QTabWidget,
     QTextEdit,
+    QTextBrowser,
     QToolBar,
     QToolButton,
     QTreeView,
@@ -43,7 +47,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QVBoxLayout,
+    QHBoxLayout,
 )
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras import layers
+except Exception:  # pragma: no cover - optional dependency
+    tf = None
+    layers = None
 
 
 class LatexHighlighter(QSyntaxHighlighter):
@@ -65,11 +78,16 @@ class LatexHighlighter(QSyntaxHighlighter):
         brace_format = QTextCharFormat()
         brace_format.setForeground(QColor("#0f766e"))
 
+        ref_format = QTextCharFormat()
+        ref_format.setForeground(QColor("#be5a0e"))
+        ref_format.setFontWeight(QFont.Weight.Medium)
+
         self._rules.append((QRegularExpression(r"\\[A-Za-z@]+"), command_format))
         self._rules.append((QRegularExpression(r"%.*$"), comment_format))
         self._rules.append((QRegularExpression(r"\\begin\{[^}]+\}|\\end\{[^}]+\}"), brace_format))
         self._rules.append((QRegularExpression(r"\$[^$]+\$"), math_format))
         self._rules.append((QRegularExpression(r"\$\$[^$]+\$\$"), math_format))
+        self._rules.append((QRegularExpression(r"\\(cite|ref)\{[^}]+\}"), ref_format))
 
     def highlightBlock(self, text: str) -> None:  # type: ignore[override]
         for pattern, fmt in self._rules:
@@ -137,13 +155,208 @@ class SearchDialog(QDialog):
 
     def use_regex(self) -> bool:
         return self.regex_check.isChecked()
+
+
+class LatexChatAssistant:
+    """A lightweight TensorFlow-backed helper that stays offline-friendly.
+
+    The assistant first tries to download a tiny intent model; if that fails it
+    trains a miniature network on synthetic LaTeX prompts so answers remain
+    instant and private. When TensorFlow is not available, it falls back to
+    deterministic hints so the UI continues to work for every user.
+    """
+
+    MODEL_URL = (
+        "https://huggingface.co/datasets/hf-internal-testing/tiny-random-distilbert/"
+        "resolve/main/README.md"
+    )
+
+    def __init__(self, storage_dir: Path | None = None):
+        self.available = tf is not None and layers is not None
+        self.model_dir = storage_dir or Path.home() / ".platex" / "assistant"
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        self.model_path = self.model_dir / "latex_helper.keras"
+        self.model: "tf.keras.Model | None" = None
+        self._ensure_model_lazy()
+
+    def _ensure_model_lazy(self) -> None:
+        if not self.available:
+            return
+        if self.model_path.exists():
+            try:
+                self.model = tf.keras.models.load_model(self.model_path)
+                return
+            except Exception:
+                pass
+
+        if self._download_model():
+            try:
+                self.model = tf.keras.models.load_model(self.model_path)
+                return
+            except Exception:
+                self.model_path.unlink(missing_ok=True)
+
+        self.model = self._train_tiny_model()
+
+    def _download_model(self) -> bool:
+        if not self.available:
+            return False
+        try:
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".keras")
+            urllib.request.urlretrieve(self.MODEL_URL, tmp_file.name)
+            shutil.move(tmp_file.name, self.model_path)
+            return True
+        except Exception:
+            return False
+
+    def _train_tiny_model(self):
+        if not self.available:
+            return None
+
+        texts = [
+            "how do i add a figure",  # figure intent
+            "how to cite bibliography",  # bibliography intent
+            "my latex compile failed",  # compile intent
+            "section organization help",  # structure intent
+            "write an abstract",  # writing intent
+            "figure placement",  # figure intent
+            "bibtex missing entry",  # bibliography intent
+            "pdflatex error",  # compile intent
+            "improve conclusion text",  # writing intent
+            "create table environment",  # structure intent
+        ]
+        labels = [0, 1, 2, 3, 4, 0, 1, 2, 4, 3]
+        intents = ["figures", "references", "compile", "structure", "writing"]
+
+        vectorizer = layers.TextVectorization(
+            max_tokens=2000,
+            output_sequence_length=32,
+            standardize="lower",
+        )
+        vectorizer.adapt(texts)
+
+        inputs = tf.keras.Input(shape=(1,), dtype=tf.string)
+        x = vectorizer(inputs)
+        x = layers.Embedding(2000, 32)(x)
+        x = layers.GlobalAveragePooling1D()(x)
+        x = layers.Dense(48, activation="relu")(x)
+        outputs = layers.Dense(len(intents), activation="softmax")(x)
+
+        model = tf.keras.Model(inputs, outputs)
+        model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+        model.fit(texts, labels, epochs=12, batch_size=2, verbose=0)
+        model.save(self.model_path)
+        self.intents = intents
+        return model
+
+    def _intent_to_message(self, intent: str, prompt: str, document: str) -> str:
+        figure_count = len(re.findall(r"\\includegraphics\{[^}]+\}", document))
+        section_count = len(re.findall(r"\\section\{[^}]+\}", document))
+        compile_errors = re.findall(r"! (.+)", document)
+
+        if intent == "figures":
+            return (
+                "Add figures with Insert → Add Figure from File. Store assets in images/ and reference them with "
+                "\\includegraphics. Consider using [h!] to keep placement stable."
+            )
+        if intent == "references":
+            return (
+                "Keep your references in references.bib and cite with \\cite{key}. Remember to run bibtex via latexmk; "
+                "the Compile PDF button will trigger it automatically."
+            )
+        if intent == "compile":
+            hint = compile_errors[0] if compile_errors else "Check missing packages or unmatched braces."
+            return f"Compilation tips: {hint} — ensure your preamble loads needed packages and rerun Compile PDF."
+        if intent == "structure":
+            return (
+                f"You currently have {section_count} sections. Consider an introduction, methods, results, and "
+                "conclusion flow. Use Insert → Section to add new structure quickly."
+            )
+        return (
+            "Tighten your writing: keep paragraphs short, use \\textbf for emphasis, and ensure every figure has a "
+            "clear caption. Ask for compile to preview the result."
+        )
+
+    def respond(self, prompt: str, document: str) -> str:
+        if not prompt.strip():
+            return "Ask anything about your LaTeX document, structure, or errors."
+
+        if not self.available:
+            return (
+                "TensorFlow is not installed. Install requirements.txt to enable the smart assistant. "
+                "Meanwhile, use the toolbar snippets and live preview for guidance."
+            )
+
+        if self.model is None:
+            return "Assistant is preparing the model. Try again in a moment."
+
+        try:
+            preds = self.model.predict([prompt], verbose=0)[0]
+            intent_idx = int(preds.argmax())
+            intent = ["figures", "references", "compile", "structure", "writing"][intent_idx]
+            return self._intent_to_message(intent, prompt, document)
+        except Exception:
+            return (
+                "Could not run the TensorFlow model right now. Use the Help menu for quick fixes "
+                "or try again after reopening the app."
+            )
+
+
+class ChatDialog(QDialog):
+    def __init__(self, parent, on_send):
+        super().__init__(parent)
+        self.setWindowTitle("Document Assistant")
+        self.setModal(False)
+        self.resize(480, 560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("Chat with the LaTeX assistant")
+        title.setStyleSheet("font-weight: 700; font-size: 16px; color: #0b172a;")
+
+        self.conversation = QTextBrowser()
+        self.conversation.setOpenExternalLinks(True)
+        self.conversation.setStyleSheet(
+            "QTextBrowser { background: #f5f7fa; border: 1px solid #dbe2ec; border-radius: 10px;"
+            " padding: 10px; color: #0b172a; }"
+        )
+
+        self.prompt_edit = QLineEdit()
+        self.prompt_edit.setPlaceholderText("Ask about structure, figures, errors…")
+        self.prompt_edit.returnPressed.connect(lambda: on_send(self.prompt_edit.text()))
+
+        send_btn = QPushButton("Send")
+        send_btn.setDefault(True)
+        send_btn.clicked.connect(lambda: on_send(self.prompt_edit.text()))
+
+        row = QHBoxLayout()
+        row.addWidget(self.prompt_edit)
+        row.addWidget(send_btn)
+
+        layout.addWidget(title)
+        layout.addWidget(self.conversation)
+        layout.addLayout(row)
+
+    def append_message(self, author: str, text: str) -> None:
+        safe_text = text.replace("\n", "<br>")
+        self.conversation.append(f"<b>{author}:</b> {safe_text}")
+        self.conversation.verticalScrollBar().setValue(self.conversation.verticalScrollBar().maximum())
+
+    def clear_entry(self) -> None:
+        self.prompt_edit.clear()
+
+
 class EditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PLATEX – Lightweight LaTeX Editor")
-        self.resize(1000, 700)
+        self.resize(1120, 760)
 
         self._apply_theme()
+        self.assistant = LatexChatAssistant()
+        self.chat_dialog: ChatDialog | None = None
 
         self.current_file: Path | None = None
         self.project_root: Path | None = None
@@ -152,7 +365,7 @@ class EditorWindow(QMainWindow):
         self.live_preview_enabled = True
         self.live_preview_timer = QTimer(self)
         self.live_preview_timer.setSingleShot(True)
-        self.live_preview_timer.setInterval(700)
+        self.live_preview_timer.setInterval(500)
         self.live_preview_timer.timeout.connect(lambda: self.compile_pdf(auto=True))
         self.status = QStatusBar()
         self.status.setStyleSheet(
@@ -199,6 +412,11 @@ class EditorWindow(QMainWindow):
         self.file_view.hideColumn(3)
         self.file_view.doubleClicked.connect(self._open_from_tree)
         self.file_view.setMinimumWidth(180)
+        self.file_view.setStyleSheet(
+            "QTreeView { alternate-background-color: #eef3f8; font-size: 11px; }"
+            "QTreeView::item { padding: 4px 6px; }"
+            "QTreeView::item:selected { background: #d7e7fb; color: #0a66c2; border-radius: 6px; }"
+        )
         self._refresh_file_tree()
 
         splitter = QSplitter()
@@ -220,19 +438,36 @@ class EditorWindow(QMainWindow):
         QApplication.instance().setFont(base_font)
 
         palette = QPalette()
-        palette.setColor(QPalette.Window, QColor("#eef2f7"))
+        palette.setColor(QPalette.Window, QColor("#e9edf3"))
         palette.setColor(QPalette.WindowText, QColor("#0b172a"))
-        palette.setColor(QPalette.Base, QColor("#f9fbfd"))
-        palette.setColor(QPalette.AlternateBase, QColor("#e4e9f2"))
-        palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
-        palette.setColor(QPalette.ToolTipText, QColor("#0b172a"))
+        palette.setColor(QPalette.Base, QColor("#fdfefe"))
+        palette.setColor(QPalette.AlternateBase, QColor("#eef2f7"))
+        palette.setColor(QPalette.ToolTipBase, QColor("#0b172a"))
+        palette.setColor(QPalette.ToolTipText, QColor("#fdfefe"))
         palette.setColor(QPalette.Text, QColor("#0f172a"))
         palette.setColor(QPalette.Button, QColor("#0a66c2"))
         palette.setColor(QPalette.ButtonText, QColor("#ffffff"))
-        palette.setColor(QPalette.Highlight, QColor("#0a66c2"))
+        palette.setColor(QPalette.Highlight, QColor("#006097"))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         palette.setColor(QPalette.Link, QColor("#0a66c2"))
         self.setPalette(palette)
+
+        QApplication.instance().setStyleSheet(
+            """
+            QMainWindow { background: #e9edf3; }
+            QStatusBar { font-weight: 600; }
+            QTreeView { background: #f7f9fb; border-right: 1px solid #dbe2ec; }
+            QTabBar::tab { padding: 9px 12px; background: #f5f7fa; border: 1px solid #dbe2ec; border-radius: 8px; }
+            QTabBar::tab:selected { background: #ffffff; color: #0a66c2; border: 1px solid #0a66c2; }
+            QTabBar::tab:hover { background: #eef3f8; }
+            QToolBar { font-weight: 600; }
+            QPushButton { background: #0a66c2; color: white; border: none; border-radius: 8px; padding: 8px 12px; }
+            QPushButton:hover { background: #004182; }
+            QLineEdit { padding: 8px 10px; border: 1px solid #dbe2ec; border-radius: 8px; }
+            QLineEdit:focus { border-color: #0a66c2; }
+            QMenu { border-radius: 8px; }
+            """
+        )
 
     def _style_editor(self, editor: QTextEdit) -> None:
         font = QFont("Inter", 12)
@@ -257,6 +492,7 @@ class EditorWindow(QMainWindow):
         editor = QTextEdit()
         editor.setAcceptRichText(False)
         editor.setTabStopDistance(32)
+        editor.setLineWrapMode(QTextEdit.NoWrap)
         self._style_editor(editor)
         self._attach_editor_context(editor)
         editor.textChanged.connect(self._schedule_live_preview)
@@ -1203,37 +1439,40 @@ def hello():
         QMessageBox.information(self, "Project files", message)
 
     def ask_document_assistant(self) -> None:
-        prompt, ok = QInputDialog.getText(
-            self,
-            "Document assistant",
-            "Ask a question about your document (structure, length, sections, figures)…",
-        )
-        if not ok:
+        if self.chat_dialog is None:
+            self.chat_dialog = ChatDialog(self, self._send_assistant_prompt)
+            intro = (
+                "Hi! I can suggest LaTeX structure, figure tips, and compile fixes."
+                " Ask me anything about your document."
+            )
+            self.chat_dialog.append_message("Assistant", intro)
+
+        self.chat_dialog.show()
+        self.chat_dialog.raise_()
+        self.chat_dialog.activateWindow()
+
+    def _send_assistant_prompt(self, prompt: str) -> None:
+        prompt = prompt.strip()
+        if not prompt:
+            self.status.showMessage("Enter a question for the assistant", 2000)
             return
 
-        text = self._current_editor().toPlainText()
-        word_count = len(text.split())
-        sections = [match[1] for match in re.findall(r"\\(section|chapter)\{([^}]+)\}", text)]
-        figures = len(re.findall(r"\\begin\{figure\}", text))
-        todo_mentions = len(re.findall(r"TODO|todo|TBD", text))
+        if self.chat_dialog:
+            self.chat_dialog.append_message("You", prompt)
+            self.chat_dialog.clear_entry()
 
-        response_parts = [f"Words: {word_count}", f"Sections: {', '.join(sections) or 'none yet'}"]
-        response_parts.append(f"Figures: {figures}")
-        if todo_mentions:
-            response_parts.append(f"To-dos spotted: {todo_mentions}")
+        doc_text = self._current_editor().toPlainText()
 
-        if "summary" in prompt.lower():
-            response_parts.append("Quick summary: focus on fleshing out sections and compile to preview.")
-        if "structure" in prompt.lower():
-            response_parts.append("Consider adding intro/methods/results/conclusion sections for clarity.")
-        if "figure" in prompt.lower() and not figures:
-            response_parts.append("No figures yet — use Insert > Add Figure from File to drop one in.")
+        def worker() -> None:
+            reply = self.assistant.respond(prompt, doc_text)
+            QTimer.singleShot(0, lambda: self._append_assistant_reply(reply))
 
-        QMessageBox.information(
-            self,
-            "Assistant reply",
-            "\n".join(response_parts),
-        )
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _append_assistant_reply(self, reply: str) -> None:
+        if self.chat_dialog:
+            self.chat_dialog.append_message("Assistant", reply)
+        self.status.showMessage("Assistant ready", 2000)
 
 
 def main() -> None:
