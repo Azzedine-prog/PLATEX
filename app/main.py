@@ -13,6 +13,8 @@ from PySide6.QtGui import (
     QPalette,
     QTextCharFormat,
     QTextCursor,
+    QTextDocument,
+    QTextOption,
     QSyntaxHighlighter,
 )
 from PySide6.QtPdf import QPdfDocument
@@ -35,6 +37,12 @@ from PySide6.QtWidgets import (
     QToolBar,
     QToolButton,
     QTreeView,
+    QDialog,
+    QCheckBox,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
 )
 
 
@@ -71,6 +79,64 @@ class LatexHighlighter(QSyntaxHighlighter):
                 self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
 
 
+class SearchDialog(QDialog):
+    def __init__(
+        self,
+        parent,
+        on_find_next,
+        on_find_prev,
+        on_replace,
+        on_replace_all,
+        on_term_changed,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Find & Replace")
+        self.setModal(False)
+
+        layout = QGridLayout(self)
+        layout.setVerticalSpacing(8)
+        layout.setHorizontalSpacing(10)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Find text or regex…")
+
+        self.replace_edit = QLineEdit()
+        self.replace_edit.setPlaceholderText("Replace with…")
+
+        self.regex_check = QCheckBox("Use regex")
+
+        find_next_btn = QPushButton("Find Next")
+        find_prev_btn = QPushButton("Find Previous")
+        replace_btn = QPushButton("Replace")
+        replace_all_btn = QPushButton("Replace All")
+
+        layout.addWidget(QLabel("Find:"), 0, 0)
+        layout.addWidget(self.search_edit, 0, 1, 1, 2)
+        layout.addWidget(self.regex_check, 0, 3)
+
+        layout.addWidget(QLabel("Replace:"), 1, 0)
+        layout.addWidget(self.replace_edit, 1, 1, 1, 3)
+
+        layout.addWidget(find_prev_btn, 2, 0)
+        layout.addWidget(find_next_btn, 2, 1)
+        layout.addWidget(replace_btn, 2, 2)
+        layout.addWidget(replace_all_btn, 2, 3)
+
+        find_next_btn.clicked.connect(on_find_next)
+        find_prev_btn.clicked.connect(on_find_prev)
+        replace_btn.clicked.connect(on_replace)
+        replace_all_btn.clicked.connect(on_replace_all)
+        self.search_edit.textChanged.connect(lambda: on_term_changed(self.term(), self.use_regex()))
+        self.regex_check.toggled.connect(lambda _: on_term_changed(self.term(), self.use_regex()))
+
+    def term(self) -> str:
+        return self.search_edit.text()
+
+    def replacement(self) -> str:
+        return self.replace_edit.text()
+
+    def use_regex(self) -> bool:
+        return self.regex_check.isChecked()
 class EditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -104,7 +170,7 @@ class EditorWindow(QMainWindow):
 
         self.preview_errors = QPlainTextEdit()
         self.preview_errors.setReadOnly(True)
-        self.preview_errors.setWordWrapMode(False)
+        self.preview_errors.setWordWrapMode(QTextOption.NoWrap)
         self.preview_errors.setStyleSheet(
             "QPlainTextEdit { background: #0b172a; color: #e5f1fb; border-left: 1px solid #dbe2ec;"
             " padding: 12px; font-family: 'JetBrains Mono', 'Consolas', 'Courier New'; font-size: 12px; }"
@@ -146,6 +212,7 @@ class EditorWindow(QMainWindow):
         self._create_menus()
         self._create_toolbar()
         self._update_title()
+        self.search_dialog: SearchDialog | None = None
 
     def _apply_theme(self) -> None:
         base_font = QFont("Inter", 11)
@@ -980,22 +1047,144 @@ def hello():
         self.status.showMessage(f"Added figure {destination.name} to project", 3000)
 
     def search_in_file(self) -> None:
+        if self.search_dialog is None:
+            self.search_dialog = SearchDialog(
+                self,
+                on_find_next=self._search_next,
+                on_find_prev=self._search_previous,
+                on_replace=self._replace_current,
+                on_replace_all=self._replace_all,
+                on_term_changed=self._update_search_highlights,
+            )
+        self.search_dialog.show()
+        self.search_dialog.raise_()
+        self.search_dialog.activateWindow()
+        self.search_dialog.search_edit.setFocus()
+
+    def _search_next(self) -> None:
+        self._perform_search(forward=True)
+
+    def _search_previous(self) -> None:
+        self._perform_search(forward=False)
+
+    def _perform_search(self, forward: bool) -> None:
+        if self.search_dialog is None:
+            return
+
+        term = self.search_dialog.term()
+        use_regex = self.search_dialog.use_regex()
+        if not term:
+            self.status.showMessage("Enter search text", 2000)
+            return
+
         editor = self._current_editor()
-        term, ok = QInputDialog.getText(self, "Find", "Search text:")
-        if not ok or not term:
-            return
+        flags = QTextDocument.FindFlag(0)
+        if not forward:
+            flags |= QTextDocument.FindFlag.FindBackward
+
+        expression = QRegularExpression(term) if use_regex else term
         cursor = editor.textCursor()
-        found = editor.document().find(term, cursor)
-        if not found.isNull():
-            editor.setTextCursor(found)
-            self.status.showMessage("Found next match", 2000)
-            return
-        found = editor.document().find(term)
-        if not found.isNull():
-            editor.setTextCursor(found)
-            self.status.showMessage("Wrapped to first match", 2000)
-        else:
+        found = editor.document().find(expression, cursor, flags)
+        if found.isNull():
+            wrap_cursor = QTextCursor(editor.document())
+            if not forward:
+                wrap_cursor.movePosition(QTextCursor.MoveOperation.End)
+            found = editor.document().find(expression, wrap_cursor, flags)
+
+        if found.isNull():
             self.status.showMessage("No matches", 2000)
+            return
+
+        editor.setTextCursor(found)
+        self.status.showMessage("Match selected", 1500)
+        self._update_search_highlights(term, use_regex)
+
+    def _update_search_highlights(self, term: str, use_regex: bool) -> None:
+        editor = self._current_editor()
+        if not term:
+            editor.setExtraSelections([])
+            return
+
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#ffe8b5"))
+        fmt.setForeground(QColor("#0b172a"))
+
+        selections: list[QTextEdit.ExtraSelection] = []
+        cursor = QTextCursor(editor.document())
+        expression = QRegularExpression(term) if use_regex else term
+
+        while True:
+            found = editor.document().find(expression, cursor)
+            if found.isNull():
+                break
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = found
+            selection.format = fmt
+            selections.append(selection)
+            cursor = found
+            cursor.setPosition(found.selectionEnd())
+
+        editor.setExtraSelections(selections)
+
+    def _replace_current(self) -> None:
+        if self.search_dialog is None:
+            return
+
+        term = self.search_dialog.term()
+        replacement = self.search_dialog.replacement()
+        use_regex = self.search_dialog.use_regex()
+        if not term:
+            self.status.showMessage("Enter search text", 2000)
+            return
+
+        editor = self._current_editor()
+        cursor = editor.textCursor()
+        if not cursor.hasSelection():
+            self._perform_search(forward=True)
+            cursor = editor.textCursor()
+
+        if not cursor.hasSelection():
+            return
+
+        selected_text = cursor.selectedText()
+        try:
+            if use_regex:
+                new_text = re.sub(term, replacement, selected_text, count=1)
+            else:
+                new_text = selected_text.replace(term, replacement, 1)
+        except re.error as exc:
+            QMessageBox.warning(self, "Regex error", f"Invalid regex: {exc}")
+            return
+
+        cursor.insertText(new_text)
+        self._update_search_highlights(term, use_regex)
+        self.status.showMessage("Replaced selection", 1500)
+
+    def _replace_all(self) -> None:
+        if self.search_dialog is None:
+            return
+
+        term = self.search_dialog.term()
+        replacement = self.search_dialog.replacement()
+        use_regex = self.search_dialog.use_regex()
+        if not term:
+            self.status.showMessage("Enter search text", 2000)
+            return
+
+        editor = self._current_editor()
+        text = editor.toPlainText()
+        try:
+            if use_regex:
+                new_text = re.sub(term, replacement, text)
+            else:
+                new_text = text.replace(term, replacement)
+        except re.error as exc:
+            QMessageBox.warning(self, "Regex error", f"Invalid regex: {exc}")
+            return
+
+        editor.setPlainText(new_text)
+        self._update_search_highlights(term, use_regex)
+        self.status.showMessage("Replaced all occurrences", 2000)
 
     def show_about(self) -> None:
         QMessageBox.information(
