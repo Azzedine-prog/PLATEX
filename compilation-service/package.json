@@ -1,0 +1,16 @@
+{
+  "name": "platex-compilation-service",
+  "version": "0.1.0",
+  "description": "Sandboxed LaTeX compilation microservice for PLATEX",
+  "main": "compile.js",
+  "type": "module",
+  "scripts": {
+    "start": "node compile.js",
+    "lint": "node --check compile.js",
+    "test": "npm run lint"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "uuid": "^9.0.1"
+  }
+}
