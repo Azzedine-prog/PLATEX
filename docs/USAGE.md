@@ -13,11 +13,12 @@
 3. **Compile to PDF & preview**
    - Live preview is on by default: keep typing and the PDF pane refreshes automatically after a short pause. Click **Live Preview** on the toolbar to pause/resume auto-compiles.
    - Click **Compile PDF** anytime for an immediate rebuild. The app searches for `latexmk`, `pdflatex`, or `xelatex` in your PATH and installs a toolchain automatically if missing.
-   - The preview stays inside PLATEX; no external viewer is launched unless you click **Open PDF Externally** after a successful compile.
+   - The preview stays inside PLATEX; no external viewer is launched unless you click **Open PDF Externally** after a successful compile. When a compile fails, the preview switches to a readable log while the matching lines are tinted inside the editor for quick fixes.
 
 4. **Faster authoring**
    - Right-click inside the editor to open the context menu: insert Overleaf-style snippets or **Add Figure from File** (copies your chosen image into the project `images/` folder and injects the LaTeX block).
    - Use **Find…** from the Edit menu or toolbar to search within the current file.
+   - Use **Ask Document Assistant** from the Help menu for a quick offline summary (word count, sections, figures, TODOs) and guidance.
 
 5. **Need a single executable?**
    - Run `python build.py` after installing dependencies to create `dist/platex` (or `dist/platex.exe` on Windows).

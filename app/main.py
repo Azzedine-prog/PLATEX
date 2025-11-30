@@ -1,11 +1,20 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFile, QPoint, Qt, QTimer, QTextStream
-from PySide6.QtGui import QAction, QColor, QFont, QPalette
+from PySide6.QtCore import QFile, QPoint, Qt, QTimer, QTextStream, QRegularExpression
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QPalette,
+    QTextCharFormat,
+    QTextCursor,
+    QSyntaxHighlighter,
+)
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
@@ -17,7 +26,9 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QPlainTextEdit,
     QSplitter,
+    QStackedWidget,
     QStatusBar,
     QTabWidget,
     QTextEdit,
@@ -25,6 +36,39 @@ from PySide6.QtWidgets import (
     QToolButton,
     QTreeView,
 )
+
+
+class LatexHighlighter(QSyntaxHighlighter):
+    def __init__(self, document):  # type: ignore[override]
+        super().__init__(document)
+        self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = []
+
+        command_format = QTextCharFormat()
+        command_format.setForeground(QColor("#0a66c2"))
+        command_format.setFontWeight(QFont.Weight.DemiBold)
+
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor("#6b7280"))
+        comment_format.setFontItalic(True)
+
+        math_format = QTextCharFormat()
+        math_format.setForeground(QColor("#7c3aed"))
+
+        brace_format = QTextCharFormat()
+        brace_format.setForeground(QColor("#0f766e"))
+
+        self._rules.append((QRegularExpression(r"\\[A-Za-z@]+"), command_format))
+        self._rules.append((QRegularExpression(r"%.*$"), comment_format))
+        self._rules.append((QRegularExpression(r"\\begin\{[^}]+\}|\\end\{[^}]+\}"), brace_format))
+        self._rules.append((QRegularExpression(r"\$[^$]+\$"), math_format))
+        self._rules.append((QRegularExpression(r"\$\$[^$]+\$\$"), math_format))
+
+    def highlightBlock(self, text: str) -> None:  # type: ignore[override]
+        for pattern, fmt in self._rules:
+            match_iter = pattern.globalMatch(text)
+            while match_iter.hasNext():
+                match = match_iter.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
 
 
 class EditorWindow(QMainWindow):
@@ -42,7 +86,7 @@ class EditorWindow(QMainWindow):
         self.live_preview_enabled = True
         self.live_preview_timer = QTimer(self)
         self.live_preview_timer.setSingleShot(True)
-        self.live_preview_timer.setInterval(900)
+        self.live_preview_timer.setInterval(700)
         self.live_preview_timer.timeout.connect(lambda: self.compile_pdf(auto=True))
         self.status = QStatusBar()
         self.status.setStyleSheet(
@@ -57,6 +101,18 @@ class EditorWindow(QMainWindow):
         self.preview.setStyleSheet(
             "QPdfView { background: #eef2f7; border-left: 1px solid #dbe2ec; }"
         )
+
+        self.preview_errors = QPlainTextEdit()
+        self.preview_errors.setReadOnly(True)
+        self.preview_errors.setWordWrapMode(False)
+        self.preview_errors.setStyleSheet(
+            "QPlainTextEdit { background: #0b172a; color: #e5f1fb; border-left: 1px solid #dbe2ec;"
+            " padding: 12px; font-family: 'JetBrains Mono', 'Consolas', 'Courier New'; font-size: 12px; }"
+        )
+
+        self.preview_stack = QStackedWidget()
+        self.preview_stack.addWidget(self.preview)
+        self.preview_stack.addWidget(self.preview_errors)
 
         self.tabs = QTabWidget()
         self.tabs.setMovable(True)
@@ -82,8 +138,8 @@ class EditorWindow(QMainWindow):
         splitter = QSplitter()
         splitter.addWidget(self.file_view)
         splitter.addWidget(self.tabs)
-        splitter.addWidget(self.preview)
-        splitter.setSizes([200, 520, 280])
+        splitter.addWidget(self.preview_stack)
+        splitter.setSizes([220, 560, 320])
         self.setCentralWidget(splitter)
 
         self._create_actions()
@@ -97,13 +153,13 @@ class EditorWindow(QMainWindow):
         QApplication.instance().setFont(base_font)
 
         palette = QPalette()
-        palette.setColor(QPalette.Window, QColor("#f3f6fb"))
-        palette.setColor(QPalette.WindowText, QColor("#1f2937"))
-        palette.setColor(QPalette.Base, QColor("#f8fafc"))
-        palette.setColor(QPalette.AlternateBase, QColor("#e9eef5"))
+        palette.setColor(QPalette.Window, QColor("#eef2f7"))
+        palette.setColor(QPalette.WindowText, QColor("#0b172a"))
+        palette.setColor(QPalette.Base, QColor("#f9fbfd"))
+        palette.setColor(QPalette.AlternateBase, QColor("#e4e9f2"))
         palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
-        palette.setColor(QPalette.ToolTipText, QColor("#1f2937"))
-        palette.setColor(QPalette.Text, QColor("#111827"))
+        palette.setColor(QPalette.ToolTipText, QColor("#0b172a"))
+        palette.setColor(QPalette.Text, QColor("#0f172a"))
         palette.setColor(QPalette.Button, QColor("#0a66c2"))
         palette.setColor(QPalette.ButtonText, QColor("#ffffff"))
         palette.setColor(QPalette.Highlight, QColor("#0a66c2"))
@@ -122,7 +178,8 @@ class EditorWindow(QMainWindow):
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
         editor.setPalette(palette)
         editor.setStyleSheet(
-            "QTextEdit { padding: 14px; border: 1px solid #dbe2ec; border-radius: 10px; }"
+            "QTextEdit { padding: 14px; border: 1px solid #dbe2ec; border-radius: 10px;"
+            " background: #fdfefe; }"
             "QTextEdit:focus { border: 1px solid #0a66c2; }"
             "QScrollBar:vertical { background: #e9eef5; width: 12px; border-radius: 6px; }"
             "QScrollBar::handle:vertical { background: #0a66c2; min-height: 30px; border-radius: 6px; }"
@@ -131,10 +188,12 @@ class EditorWindow(QMainWindow):
 
     def _create_editor_widget(self) -> QTextEdit:
         editor = QTextEdit()
+        editor.setAcceptRichText(False)
         editor.setTabStopDistance(32)
         self._style_editor(editor)
         self._attach_editor_context(editor)
         editor.textChanged.connect(self._schedule_live_preview)
+        editor.highlighter = LatexHighlighter(editor.document())  # type: ignore[attr-defined]
         return editor
 
     def _create_actions(self) -> None:
@@ -208,6 +267,9 @@ class EditorWindow(QMainWindow):
         self.project_help_action = QAction("Project files & tabs", self)
         self.project_help_action.triggered.connect(self.show_project_help)
 
+        self.assistant_action = QAction("Ask Document Assistant", self)
+        self.assistant_action.triggered.connect(self.ask_document_assistant)
+
     def _create_menus(self) -> None:
         menu_bar = QMenuBar(self)
         file_menu = menu_bar.addMenu("File")
@@ -244,6 +306,8 @@ class EditorWindow(QMainWindow):
         help_menu = menu_bar.addMenu("Help")
         help_menu.addAction(self.project_help_action)
         help_menu.addAction(self.about_action)
+        help_menu.addSeparator()
+        help_menu.addAction(self.assistant_action)
         menu_bar.setStyleSheet(
             "QMenuBar { background: #ffffff; border-bottom: 1px solid #dbe2ec; }"
             "QMenuBar::item { padding: 6px 10px; margin: 2px; }"
@@ -281,6 +345,7 @@ class EditorWindow(QMainWindow):
         toolbar.addAction(self.code_action)
         toolbar.addSeparator()
         toolbar.addAction(self.about_action)
+        toolbar.addAction(self.assistant_action)
         snippet_menu = QMenu("Insert Snippet", self)
         for action in (
             self.figure_action,
@@ -670,21 +735,63 @@ Content goes here.
 
         if result.returncode == 0 and pdf_output.exists():
             self.status.showMessage("Compilation successful (preview refreshed)", 2000)
+            self._clear_error_marks()
             self._load_preview(pdf_output)
         else:
+            self._show_compile_errors(result.stdout or "Compilation failed without output")
             if not auto:
-                QMessageBox.critical(self, "Compilation failed", result.stdout or "No output")
+                self.status.showMessage("Compilation failed – see error pane", 4000)
             else:
-                self.status.showMessage("Live preview compile failed – check document", 3000)
+                self.status.showMessage("Live preview compile failed – see error pane", 4000)
         self.is_compiling = False
 
     def _load_preview(self, pdf_output: Path) -> None:
         load_status = self.preview_document.load(str(pdf_output))
         if load_status == QPdfDocument.Status.Ready:
             self.preview.setPageMode(QPdfView.PageMode.MultiPage)
+            self.preview_stack.setCurrentWidget(self.preview)
             self.preview.update()
             return
         self.status.showMessage("Preview unavailable – PDF saved to disk", 4000)
+
+    def _show_compile_errors(self, log: str) -> None:
+        self.preview_errors.setPlainText(log)
+        self.preview_stack.setCurrentWidget(self.preview_errors)
+
+        line_numbers: list[int] = []
+        for line in log.splitlines():
+            match = re.search(r"l\.(\d+)", line)
+            if match:
+                try:
+                    line_numbers.append(int(match.group(1)))
+                except ValueError:
+                    continue
+        self._mark_error_lines(line_numbers)
+
+    def _mark_error_lines(self, lines: list[int]) -> None:
+        editor = self._current_editor()
+        selections: list[QTextEdit.ExtraSelection] = []
+        if lines:
+            error_format = QTextCharFormat()
+            error_format.setBackground(QColor("#ffe4e6"))
+            error_format.setForeground(QColor("#9f1239"))
+            for line_number in lines:
+                block = editor.document().findBlockByNumber(max(0, line_number - 1))
+                if not block.isValid():
+                    continue
+                selection = QTextEdit.ExtraSelection()
+                cursor = QTextCursor(block)
+                selection.cursor = cursor
+                selection.cursor.clearSelection()
+                selection.format = error_format
+                selections.append(selection)
+        editor.setExtraSelections(selections)
+
+    def _clear_error_marks(self) -> None:
+        self.preview_errors.clear()
+        self.preview_stack.setCurrentWidget(self.preview)
+        editor = self._current_editor()
+        editor.setExtraSelections([])
 
     def open_pdf_externally(self) -> None:
         if not self.last_pdf_output or not self.last_pdf_output.exists():
@@ -905,6 +1012,39 @@ def hello():
             "when you add figures from disk."
         )
         QMessageBox.information(self, "Project files", message)
+
+    def ask_document_assistant(self) -> None:
+        prompt, ok = QInputDialog.getText(
+            self,
+            "Document assistant",
+            "Ask a question about your document (structure, length, sections, figures)…",
+        )
+        if not ok:
+            return
+
+        text = self._current_editor().toPlainText()
+        word_count = len(text.split())
+        sections = [match[1] for match in re.findall(r"\\(section|chapter)\{([^}]+)\}", text)]
+        figures = len(re.findall(r"\\begin\{figure\}", text))
+        todo_mentions = len(re.findall(r"TODO|todo|TBD", text))
+
+        response_parts = [f"Words: {word_count}", f"Sections: {', '.join(sections) or 'none yet'}"]
+        response_parts.append(f"Figures: {figures}")
+        if todo_mentions:
+            response_parts.append(f"To-dos spotted: {todo_mentions}")
+
+        if "summary" in prompt.lower():
+            response_parts.append("Quick summary: focus on fleshing out sections and compile to preview.")
+        if "structure" in prompt.lower():
+            response_parts.append("Consider adding intro/methods/results/conclusion sections for clarity.")
+        if "figure" in prompt.lower() and not figures:
+            response_parts.append("No figures yet — use Insert > Add Figure from File to drop one in.")
+
+        QMessageBox.information(
+            self,
+            "Assistant reply",
+            "\n".join(response_parts),
+        )
 
 
 def main() -> None:
