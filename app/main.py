@@ -11,16 +11,19 @@ from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFileSystemModel,
     QInputDialog,
     QMainWindow,
     QMenu,
     QMenuBar,
     QMessageBox,
-    QTextEdit,
-    QToolButton,
-    QToolBar,
-    QStatusBar,
     QSplitter,
+    QStatusBar,
+    QTabWidget,
+    QTextEdit,
+    QToolBar,
+    QToolButton,
+    QTreeView,
 )
 
 
@@ -32,10 +35,6 @@ class EditorWindow(QMainWindow):
 
         self._apply_theme()
 
-        self.editor = QTextEdit()
-        self.editor.setTabStopDistance(32)
-        self._style_editor()
-
         self.preview_document = QPdfDocument(self)
         self.preview = QPdfView()
         self.preview.setDocument(self.preview_document)
@@ -44,10 +43,31 @@ class EditorWindow(QMainWindow):
             "QPdfView { background: #eef2f7; border-left: 1px solid #dbe2ec; }"
         )
 
+        self.tabs = QTabWidget()
+        self.tabs.setMovable(True)
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self._close_tab)
+        self.tabs.currentChanged.connect(self._tab_changed)
+        first_editor = self._create_editor_widget()
+        self.tabs.addTab(first_editor, "Untitled.tex")
+
+        self.file_model = QFileSystemModel()
+        self.file_model.setRootPath(str(Path.home()))
+        self.file_view = QTreeView()
+        self.file_view.setModel(self.file_model)
+        self.file_view.setHeaderHidden(True)
+        self.file_view.hideColumn(1)
+        self.file_view.hideColumn(2)
+        self.file_view.hideColumn(3)
+        self.file_view.doubleClicked.connect(self._open_from_tree)
+        self.file_view.setMinimumWidth(180)
+        self._refresh_file_tree()
+
         splitter = QSplitter()
-        splitter.addWidget(self.editor)
+        splitter.addWidget(self.file_view)
+        splitter.addWidget(self.tabs)
         splitter.addWidget(self.preview)
-        splitter.setSizes([650, 350])
+        splitter.setSizes([200, 520, 280])
         self.setCentralWidget(splitter)
 
         self.current_file: Path | None = None
@@ -68,8 +88,6 @@ class EditorWindow(QMainWindow):
         self._create_actions()
         self._create_menus()
         self._create_toolbar()
-        self._create_context_menu()
-        self.editor.textChanged.connect(self._schedule_live_preview)
         self._update_title()
 
     def _apply_theme(self) -> None:
@@ -92,23 +110,31 @@ class EditorWindow(QMainWindow):
         palette.setColor(QPalette.Link, QColor("#0a66c2"))
         self.setPalette(palette)
 
-    def _style_editor(self) -> None:
-        font = QFont("JetBrains Mono", 12)
-        font.setStyleHint(QFont.Monospace)
-        self.editor.setFont(font)
-        palette = self.editor.palette()
+    def _style_editor(self, editor: QTextEdit) -> None:
+        font = QFont("Inter", 12)
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        editor.setFont(font)
+        palette = editor.palette()
         palette.setColor(QPalette.Base, QColor("#f8fafc"))
         palette.setColor(QPalette.Text, QColor("#0b172a"))
         palette.setColor(QPalette.Highlight, QColor("#0a66c2"))
         palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-        self.editor.setPalette(palette)
-        self.editor.setStyleSheet(
+        editor.setPalette(palette)
+        editor.setStyleSheet(
             "QTextEdit { padding: 14px; border: 1px solid #dbe2ec; border-radius: 10px; }"
             "QTextEdit:focus { border: 1px solid #0a66c2; box-shadow: 0 0 0 3px rgba(10,102,194,0.18); }"
             "QScrollBar:vertical { background: #e9eef5; width: 12px; border-radius: 6px; }"
             "QScrollBar::handle:vertical { background: #0a66c2; min-height: 30px; border-radius: 6px; }"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
+
+    def _create_editor_widget(self) -> QTextEdit:
+        editor = QTextEdit()
+        editor.setTabStopDistance(32)
+        self._style_editor(editor)
+        self._attach_editor_context(editor)
+        editor.textChanged.connect(self._schedule_live_preview)
+        return editor
 
     def _create_actions(self) -> None:
         self.new_project_action = QAction("New Project Folder", self)
@@ -166,11 +192,20 @@ class EditorWindow(QMainWindow):
         self.code_action = QAction("Insert Code", self)
         self.code_action.triggered.connect(lambda: self.insert_snippet("code"))
 
+        self.add_figure_file_action = QAction("Add Figure from File…", self)
+        self.add_figure_file_action.triggered.connect(self.add_figure_from_file)
+
+        self.search_action = QAction("Find…", self)
+        self.search_action.triggered.connect(self.search_in_file)
+
         self.open_pdf_action = QAction("Open PDF Externally", self)
         self.open_pdf_action.triggered.connect(self.open_pdf_externally)
 
         self.about_action = QAction("About", self)
         self.about_action.triggered.connect(self.show_about)
+
+        self.project_help_action = QAction("Project files & tabs", self)
+        self.project_help_action.triggered.connect(self.show_project_help)
 
     def _create_menus(self) -> None:
         menu_bar = QMenuBar(self)
@@ -179,6 +214,9 @@ class EditorWindow(QMainWindow):
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+
+        edit_menu = menu_bar.addMenu("Edit")
+        edit_menu.addAction(self.search_action)
 
         project_menu = menu_bar.addMenu("Project")
         project_menu.addAction(self.new_project_action)
@@ -195,6 +233,7 @@ class EditorWindow(QMainWindow):
         insert_menu.addAction(self.toc_action)
         insert_menu.addAction(self.theorem_action)
         insert_menu.addAction(self.code_action)
+        insert_menu.addAction(self.add_figure_file_action)
 
         preview_menu = menu_bar.addMenu("Preview")
         preview_menu.addAction(self.compile_action)
@@ -202,6 +241,7 @@ class EditorWindow(QMainWindow):
         preview_menu.addAction(self.open_pdf_action)
 
         help_menu = menu_bar.addMenu("Help")
+        help_menu.addAction(self.project_help_action)
         help_menu.addAction(self.about_action)
         menu_bar.setStyleSheet(
             "QMenuBar { background: #ffffff; border-bottom: 1px solid #dbe2ec; }"
@@ -227,6 +267,7 @@ class EditorWindow(QMainWindow):
         toolbar.addAction(self.compile_action)
         toolbar.addAction(self.live_preview_action)
         toolbar.addAction(self.open_pdf_action)
+        toolbar.addAction(self.search_action)
         toolbar.addSeparator()
         toolbar.addAction(self.figure_action)
         toolbar.addAction(self.table_action)
@@ -250,6 +291,7 @@ class EditorWindow(QMainWindow):
             self.toc_action,
             self.theorem_action,
             self.code_action,
+            self.add_figure_file_action,
         ):
             snippet_menu.addAction(action)
 
@@ -273,15 +315,17 @@ class EditorWindow(QMainWindow):
         )
         self.addToolBar(toolbar)
 
-    def _create_context_menu(self) -> None:
-        self.editor.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.editor.customContextMenuRequested.connect(self._show_context_menu)
+    def _attach_editor_context(self, editor: QTextEdit) -> None:
+        editor.setContextMenuPolicy(Qt.CustomContextMenu)
+        editor.customContextMenuRequested.connect(lambda pos: self._show_context_menu(editor, pos))
 
-    def _show_context_menu(self, pos: QPoint) -> None:
-        menu = self.editor.createStandardContextMenu()
+    def _show_context_menu(self, editor: QTextEdit, pos: QPoint) -> None:
+        menu = editor.createStandardContextMenu()
         menu.addSeparator()
         menu.addAction(self.compile_action)
         menu.addAction(self.live_preview_action)
+        menu.addAction(self.search_action)
+        menu.addAction(self.add_figure_file_action)
         menu.addAction(self.open_pdf_action)
 
         snippet_menu = QMenu("Insert snippet", self)
@@ -298,11 +342,64 @@ class EditorWindow(QMainWindow):
         ):
             snippet_menu.addAction(action)
         menu.addMenu(snippet_menu)
-        menu.exec(self.editor.mapToGlobal(pos))
+        menu.exec(editor.mapToGlobal(pos))
 
     def _update_title(self) -> None:
         filename = self.current_file.name if self.current_file else "Untitled.tex"
         self.setWindowTitle(f"PLATEX – {filename}")
+
+    def _current_editor(self) -> QTextEdit:
+        widget = self.tabs.currentWidget()
+        assert isinstance(widget, QTextEdit)
+        return widget
+
+    def _tab_path(self, index: int | None = None) -> Path | None:
+        idx = self.tabs.currentIndex() if index is None else index
+        data = self.tabs.tabData(idx)
+        return Path(data) if data else None
+
+    def _set_tab_path(self, index: int, path: Path | None) -> None:
+        self.tabs.setTabData(index, str(path) if path else None)
+        label = path.name if path else "Untitled.tex"
+        self.tabs.setTabText(index, label)
+        if index == self.tabs.currentIndex():
+            self.current_file = path
+            self._update_title()
+
+    def _open_editor_tab(self, path: Path | None, content: str) -> None:
+        if path:
+            for i in range(self.tabs.count()):
+                if self.tabs.tabData(i) == str(path):
+                    self.tabs.setCurrentIndex(i)
+                    return
+        editor = self._create_editor_widget()
+        editor.setPlainText(content)
+        index = self.tabs.addTab(editor, path.name if path else "Untitled.tex")
+        self._set_tab_path(index, path)
+        self.tabs.setCurrentIndex(index)
+
+    def _tab_changed(self, index: int) -> None:
+        self.current_file = self._tab_path(index)
+        self._update_title()
+
+    def _close_tab(self, index: int) -> None:
+        if self.tabs.count() == 1:
+            self.tabs.widget(index).setPlainText("")
+            self._set_tab_path(index, None)
+            return
+        self.tabs.removeTab(index)
+        self.current_file = self._tab_path()
+        self._update_title()
+
+    def _refresh_file_tree(self) -> None:
+        root = str(self.project_root) if self.project_root else str(Path.home())
+        self.file_model.setRootPath(root)
+        self.file_view.setRootIndex(self.file_model.index(root))
+
+    def _open_from_tree(self, index) -> None:  # type: ignore[override]
+        path = Path(self.file_model.filePath(index))
+        if path.is_file():
+            self._load_file(path)
 
     def _schedule_live_preview(self) -> None:
         if not self.live_preview_enabled:
@@ -319,13 +416,8 @@ class EditorWindow(QMainWindow):
 
     def new_file(self) -> None:
         if self._confirm_discard_changes():
-            self.editor.clear()
-            if self.project_root:
-                self.current_file = self.project_root / "main.tex"
-            else:
-                self.current_file = None
+            self._open_editor_tab(None, "")
             self.last_pdf_output = None
-            self._update_title()
             self.status.showMessage("New file created", 2000)
 
     def create_project(self) -> None:
@@ -387,6 +479,7 @@ Welcome to your new PLATEX project. Add sections, figures, and more from the too
             )
 
         self.project_root = target
+        self._refresh_file_tree()
         self._load_file(main_tex)
         self.status.showMessage(f"Project created at {target}", 4000)
 
@@ -402,6 +495,7 @@ Welcome to your new PLATEX project. Add sections, figures, and more from the too
             return
 
         self.project_root = project_path
+        self._refresh_file_tree()
         self._load_file(tex_files[0])
         self.status.showMessage(f"Opened project {project_path}", 3000)
 
@@ -455,9 +549,7 @@ Content goes here.
         names = list(templates.keys())
         name, ok = QInputDialog.getItem(self, "New from template", "Choose a starting point", names, 0, False)
         if ok and name in templates:
-            self.editor.setPlainText(templates[name])
-            self.current_file = None
-            self._update_title()
+            self._open_editor_tab(None, templates[name])
             self.status.showMessage(f"Loaded {name} template", 2000)
 
     def open_file(self) -> None:
@@ -474,11 +566,10 @@ Content goes here.
             QMessageBox.warning(self, "Error", f"Cannot open file: {path}")
             return
         stream = QTextStream(file)
-        self.editor.setPlainText(stream.readAll())
+        content = stream.readAll()
         file.close()
-        self.current_file = path
+        self._open_editor_tab(path, content)
         self.last_pdf_output = None
-        self._update_title()
         self.status.showMessage(f"Opened {path}", 2000)
 
     def save_file(self, save_as: bool = False) -> None:
@@ -495,11 +586,12 @@ Content goes here.
             self.current_file = Path(path)
 
         assert self.current_file is not None
+        editor = self._current_editor()
         try:
             with open(self.current_file, "w", encoding="utf-8") as handle:
-                handle.write(self.editor.toPlainText())
+                handle.write(editor.toPlainText())
             self.status.showMessage(f"Saved to {self.current_file}", 2000)
-            self._update_title()
+            self._set_tab_path(self.tabs.currentIndex(), self.current_file)
         except OSError as exc:
             QMessageBox.critical(self, "Error", f"Failed to save file: {exc}")
 
@@ -732,13 +824,70 @@ def hello():
 \\end{lstlisting}
 
 """,
-        }
+        } 
 
         text = snippets.get(kind)
         if text:
-            cursor = self.editor.textCursor()
+            cursor = self._current_editor().textCursor()
             cursor.insertText(text)
             self.status.showMessage(f"Inserted {kind} snippet", 2000)
+
+    def add_figure_from_file(self) -> None:
+        editor = self._current_editor()
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Add figure to project",
+            str(self.project_root) if self.project_root else "",
+            "Images (*.png *.jpg *.jpeg *.pdf *.eps *.svg);;All Files (*)",
+        )
+        if not path:
+            return
+
+        source = Path(path)
+        target_root = self.project_root or (self.current_file.parent if self.current_file else Path.home() / "PLATEX")
+        images_dir = target_root / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        destination = images_dir / source.name
+
+        try:
+            shutil.copy(source, destination)
+        except OSError as exc:
+            QMessageBox.critical(self, "Copy failed", f"Could not copy image: {exc}")
+            return
+
+        try:
+            rel_path = destination.relative_to(self.project_root) if self.project_root else destination.name
+        except ValueError:
+            rel_path = destination.name
+
+        snippet = f"""\\begin{{figure}}[h]
+  \centering
+  \includegraphics[width=0.8\\linewidth]{{{rel_path}}}
+  \caption{{Caption text}}
+  \label{{fig:{destination.stem}}}
+\\end{{figure}}
+"""
+        cursor = editor.textCursor()
+        cursor.insertText(snippet)
+        self.status.showMessage(f"Added figure {destination.name} to project", 3000)
+
+    def search_in_file(self) -> None:
+        editor = self._current_editor()
+        term, ok = QInputDialog.getText(self, "Find", "Search text:")
+        if not ok or not term:
+            return
+        cursor = editor.textCursor()
+        found = editor.document().find(term, cursor)
+        if not found.isNull():
+            editor.setTextCursor(found)
+            self.status.showMessage("Found next match", 2000)
+            return
+        found = editor.document().find(term)
+        if not found.isNull():
+            editor.setTextCursor(found)
+            self.status.showMessage("Wrapped to first match", 2000)
+        else:
+            self.status.showMessage("No matches", 2000)
 
     def show_about(self) -> None:
         QMessageBox.information(
@@ -747,6 +896,14 @@ def hello():
             "PLATEX is a lightweight desktop LaTeX editor built with Qt.\n"
             "It saves .tex files locally and can invoke your installed LaTeX distribution to build PDFs.",
         )
+
+    def show_project_help(self) -> None:
+        message = (
+            "Use the tabs for each open .tex file. The Project Files panel on the left mirrors your folder; "
+            "double-click to open files or right-click in the editor for quick inserts. The images folder is managed automatically "
+            "when you add figures from disk."
+        )
+        QMessageBox.information(self, "Project files", message)
 
 
 def main() -> None:

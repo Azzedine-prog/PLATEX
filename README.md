@@ -3,11 +3,11 @@
 PLATEX is now a simple, cross-platform desktop LaTeX editor built with Python and Qt. It saves `.tex` files locally and can call your installed LaTeX distribution (TeX Live or MiKTeX) to produce PDFs. Everything ships as a single runnable application that you can launch directly or package via PyInstaller.
 
 ## What you get
-- A LinkedIn-inspired, modern Qt editor with open/save, menu bar shortcuts, **project folders**, a one-click **Compile PDF** button, and a built-in split-view PDF preview (no external viewer pops up unless you ask).
+- A LinkedIn-inspired, modern Qt editor with tabs for open files, a left-hand **Project Files** browser, menu bar shortcuts, **project folders**, a one-click **Compile PDF** button, and a built-in split-view PDF preview (no external viewer pops up unless you ask).
 - Automatic detection of `latexmk`, `pdflatex`, or `xelatex` (whichever is available) with silent one-time installation when missing.
 - Double-click installers for Windows plus single-command setup for macOS/Linux.
 - One-file binary builds via PyInstaller (`platex.exe` on Windows, `platex` on macOS/Linux).
-- Starter templates (article/report/beamer) plus richer Overleaf-style snippets (figures, tables, bibliography, sections, equations, lists, table of contents, theorems, code listings) available from the toolbar dropdown, context menu, and menu bar, and "New Project" scaffolding with `main.tex`, `references.bib`, and an `images/` folder.
+- Starter templates (article/report/beamer) plus richer Overleaf-style snippets (figures, tables, bibliography, sections, equations, lists, table of contents, theorems, code listings) available from the toolbar dropdown, context menu, and menu bar, and "New Project" scaffolding with `main.tex`, `references.bib`, and an `images/` folder. A dedicated **Add Figure from File** workflow copies images into your project and injects the LaTeX block automatically, and a **Find** command makes in-file search quick.
 
 ## Quick start for non-technical users
 ### Windows (double-click)
@@ -41,8 +41,8 @@ pip install -r requirements.txt
 python app/main.py
 ```
 - Use **New Project Folder** to scaffold a ready-to-edit workspace with `main.tex`, `references.bib`, and `images/`.
-- Live preview is on by default: keep typing and the PDF pane quietly refreshes after a short pause. Toggle **Live Preview** on the toolbar to pause/resume auto-compiles. Use **Open PDF Externally** when you explicitly want the generated file in your system viewer. A dedicated snippets dropdown and right-click context menu keep common Overleaf-style inserts one click away.
-- Use **New from Template** for an article/report/beamer starter, and the toolbar snippets (figure/table/bibliography/section/equation/list/TOC/theorem/code) to insert common blocks quickly.
+- Live preview is on by default: keep typing and the PDF pane quietly refreshes after a short pause. Toggle **Live Preview** on the toolbar to pause/resume auto-compiles. Use **Open PDF Externally** when you explicitly want the generated file in your system viewer. Tabs keep multiple `.tex` files open at once while the left **Project Files** tree mirrors your folder for quick double-click opens.
+- Use **New from Template** for an article/report/beamer starter, and the toolbar snippets (figure/table/bibliography/section/equation/list/TOC/theorem/code) to insert common blocks quickly. The context menu also includes **Add Figure from File** to copy an image into your project `images/` folder and drop in the LaTeX block, plus a **Find…** command for inline searching.
 
 ## Troubleshooting
 - **"No LaTeX compiler found"**: Re-run the platform script; it now installs TeX Live/MiKTeX automatically when possible.
